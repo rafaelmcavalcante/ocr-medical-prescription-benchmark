@@ -16,4 +16,8 @@ dependencies = [
     "pytesseract>=0.3.13",
     "torch>=2.13.0",
     "transformers>=5.14.1",
+    "watchdog>=6.0.0",
 ]
+
+[tool.marimo.runtime]
+watcher_on_save = "autorun"

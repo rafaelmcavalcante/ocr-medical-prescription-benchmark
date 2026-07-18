@@ -6,7 +6,9 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    return
+    import marimo as mo
+
+    return (mo,)
 
 
 @app.cell(hide_code=True)
@@ -100,14 +102,55 @@ def _(mo):
 @app.cell
 def _():
     import pandas as pd
+    import os
 
-    return
+    return os, pd
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     # 6 Carregando o Dataset
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, os, pd):
+    # ── Caminhos do dataset (já extraído em RxHandBD) ──
+    DATASET_DIR = "RxHandBD"
+    CAMINHO_CSV_TREINO = os.path.join(DATASET_DIR, "Train_Label.csv")
+    CAMINHO_CSV_TESTE = os.path.join(DATASET_DIR, "Test_Labels.csv")
+    DIRETORIO_TREINO = os.path.join(DATASET_DIR, "Train_Set")
+    DIRETORIO_TESTE = os.path.join(DATASET_DIR, "Test_Set")
+
+    # ── Carregar CSVs ──
+    df_train = pd.read_csv(CAMINHO_CSV_TREINO)
+    df_test  = pd.read_csv(CAMINHO_CSV_TESTE)
+
+    # ── Amostra fixa (500 imagens, random_state=42 para reprodutibilidade) ──
+    TAMANHO_AMOSTRA = 500
+    df_amostra = df_test.sample(n=TAMANHO_AMOSTRA, random_state=42).reset_index(drop=True)
+
+    # ── Vocabulário global (treino + teste, para pós-processamento fuzzy) ──
+    VOCABULARIO = (
+        pd.concat([df_train["Text"], df_test["Text"]])
+        .astype(str)
+        .str.strip()
+        .drop_duplicates()
+        .tolist()
+    )
+
+    # ── Resumo ──
+    mo.md(f"""
+    **Dataset carregado com sucesso**
+
+    | Conjunto | Quantidade |
+    |---|---|
+    | Amostra de teste | **{len(df_amostra):,}** imagens |
+    | Vocabulário de treino | **{len(VOCABULARIO):,}** palavras únicas |
+    | Total treino (Train_Set) | **{len(df_train):,}** imagens |
+    | Total teste (Test_Set) | **{len(df_test):,}** imagens |
     """)
     return
 
