@@ -101,10 +101,12 @@ def _(mo):
 
 @app.cell
 def _():
-    import pandas as pd
     import os
+    import jiwer
+    import Levenshtein
+    import pandas as pd
 
-    return os, pd
+    return Levenshtein, jiwer, os, pd
 
 
 @app.cell(hide_code=True)
@@ -116,7 +118,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, os, pd):
+def _(mo):
     # ── Caminhos do dataset (já extraído em RxHandBD) ──
     DATASET_DIR = "RxHandBD"
     CAMINHO_CSV_TREINO = os.path.join(DATASET_DIR, "Train_Label.csv")
@@ -152,14 +154,95 @@ def _(mo, os, pd):
     | Total treino (Train_Set) | **{len(df_train):,}** imagens |
     | Total teste (Test_Set) | **{len(df_test):,}** imagens |
     """)
+    return df_train, df_test, df_amostra, VOCABULARIO, DIRETORIO_TREINO, DIRETORIO_TESTE
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # 7 Métricas e Funções Auxiliares
+    """)
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # 7 Funções auxiliares
+    ## 7.1 Métricas utilizadas
+
+    | Métrica | Descrição |
+    |---|---|
+    | **Levenshtein (distância)** | Nº mínimo de inserções, remoções ou substituições de caracteres para transformar a predição no gabarito. Quanto menor, melhor. |
+    | **Levenshtein (similaridade)** | Versão normalizada (0 a 1) da distância. 1 = idêntico, 0 = totalmente diferente. |
+    | **CER** (*Character Error Rate*) | Taxa de erro a nível de caractere: `(inserçōes + deleções + substituições) / total de caracteres`. |
+    | **WER** (*Word Error Rate*) | Taxa de erro a nível de palavra. Mesma lógica do CER, mas operando sobre palavras. |
+    | **Word Accuracy** | Acurácia exata: 1 se o texto predito for **idêntico** ao gabarito, 0 caso contrário. |
+    | **Word Accuracy (80%)** | Acurácia "flexível": considera correto se a similaridade de Levenshtein for **≥ 80%**. |
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    def normalizar(texto: str) -> str:
+        """Normaliza texto: strip + lowercase."""
+        return str(texto).strip().lower()
+
+
+    def calcular_metricas(gabarito: str, predicao: str):
+        """
+        Calcula todas as métricas entre gabarito e predição.
+
+        Retorna (lev_dist, lev_ratio, cer, wer, word_acc, word_acc_80).
+        """
+        g = normalizar(gabarito)
+        p = normalizar(predicao)
+
+        # Casos de string vazia
+        if not g and not p:
+            return (0, 1.0, 0.0, 0.0, 1.0, 1.0)
+        if not g or not p:
+            return (Levenshtein.distance(g, p), 0.0, 1.0, 1.0, 0.0, 0.0)
+
+        lev_dist = Levenshtein.distance(g, p)
+        lev_ratio = Levenshtein.ratio(g, p)
+        cer = jiwer.cer(g, p)
+        wer = jiwer.wer(g, p)
+        word_acc = 1.0 if g == p else 0.0
+        word_acc_80 = 1.0 if lev_ratio >= 0.80 else 0.0
+
+        return (lev_dist, lev_ratio, cer, wer, word_acc, word_acc_80)
+
+    return (normalizar,)
+
+
+@app.cell(hide_code=True)
+def _(normalizar):
+    def corrigir_fuzzy(texto_ocr: str, vocabulario: list[str], limiar: float = 0.0) -> str:
+        """
+        Corrige texto via fuzzy matching contra um vocabulário conhecido.
+
+        Usa similaridade normalizada de Levenshtein. Se nenhum termo
+        atingir o limiar, retorna o texto original sem alteração.
+        """
+        texto_ocr = normalizar(texto_ocr)
+        # Remove ruídos comuns de OCR (pontuação isolada)
+        texto_ocr = "".join(c for c in texto_ocr if c.isalnum() or c.isspace()).strip()
+
+        if len(texto_ocr) < 2 or not vocabulario:
+            return texto_ocr
+
+        melhor_termo = texto_ocr
+        melhor_score = 0.0
+
+        for termo in vocabulario:
+            score = Levenshtein.ratio(texto_ocr, normalizar(termo))
+            if score > melhor_score:
+                melhor_score = score
+                melhor_termo = normalizar(termo)
+
+        return melhor_termo if melhor_score >= limiar else texto_ocr
+
     return
 
 
