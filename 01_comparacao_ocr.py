@@ -4,7 +4,7 @@ __generated_with = "0.23.14"
 app = marimo.App(width="medium")
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import marimo as mo
 
@@ -15,7 +15,7 @@ def _():
 def _(mo):
     mo.md(r"""
     # 1 Introdução
-    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte de um projeto do REVAI 4.0 do LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de quatro alternativas de OCR: Tesseract, PaddleOCR, TrOCR e LLaVA.
+    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte de um projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de quatro alternativas de OCR: Tesseract, PaddleOCR, TrOCR e LLaVA.
     """)
     return
 
@@ -105,8 +105,31 @@ def _():
     import jiwer
     import Levenshtein
     import pandas as pd
+    import pytesseract
+    import torch
 
-    return Levenshtein, jiwer, os, pd
+    from paddleocr import PaddleOCR
+    from PIL import Image
+    from transformers import (
+        TrOCRProcessor,
+        VisionEncoderDecoderModel,
+        ViTImageProcessor,
+        XLMRobertaTokenizer,
+    )
+
+    return (
+        Levenshtein,
+        PaddleOCR,
+        TrOCRProcessor,
+        ViTImageProcessor,
+        VisionEncoderDecoderModel,
+        XLMRobertaTokenizer,
+        jiwer,
+        os,
+        pd,
+        pytesseract,
+        torch,
+    )
 
 
 @app.cell(hide_code=True)
@@ -118,7 +141,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, os, pd):
     # ── Caminhos do dataset (já extraído em RxHandBD) ──
     DATASET_DIR = "RxHandBD"
     CAMINHO_CSV_TREINO = os.path.join(DATASET_DIR, "Train_Label.csv")
@@ -154,7 +177,7 @@ def _(mo):
     | Total treino (Train_Set) | **{len(df_train):,}** imagens |
     | Total teste (Test_Set) | **{len(df_test):,}** imagens |
     """)
-    return df_train, df_test, df_amostra, VOCABULARIO, DIRETORIO_TREINO, DIRETORIO_TESTE
+    return
 
 
 @app.cell(hide_code=True)
@@ -183,7 +206,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _():
+def _(Levenshtein, jiwer):
     def normalizar(texto: str) -> str:
         """Normaliza texto: strip + lowercase."""
         return str(texto).strip().lower()
@@ -217,7 +240,7 @@ def _():
 
 
 @app.cell(hide_code=True)
-def _(normalizar):
+def _(Levenshtein, normalizar):
     def corrigir_fuzzy(texto_ocr: str, vocabulario: list[str], limiar: float = 0.0) -> str:
         """
         Corrige texto via fuzzy matching contra um vocabulário conhecido.
@@ -250,6 +273,100 @@ def _(normalizar):
 def _(mo):
     mo.md(r"""
     # 8 Carregando os Modelos
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 8.1 Tesseract
+
+    Engine de OCR open-source clássica. Rápida, leve, mas sensível a ruído e variação de caligrafia.
+
+    ⚠️ **Dependência de sistema:** requer `tesseract-ocr` instalado (`sudo apt install tesseract-ocr`).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, pytesseract):
+    mo.md(f"""
+    ✅ **Tesseract** carregado
+
+    Versão: `pytesseract {pytesseract.__version__}`
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 8.2 PaddleOCR
+
+    Modelo baseado em PaddleOCR, arquitetura PP-OCRv6. Reconhecimento robusto com detector + recognizer integrados.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(PaddleOCR, mo, torch):
+    _device = "gpu" if torch.cuda.is_available() else "cpu"
+
+    ocr_paddle = PaddleOCR(
+        ocr_version="PP-OCRv6",
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        engine="transformers",
+        device=_device,
+        lang="en",
+    )
+
+    mo.md(f"""
+    ✅ **PaddleOCR** carregado
+
+    Dispositivo: `{_device}` | Engine: `transformers`
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 8.3 TrOCR
+
+    Modelo Transformer (Encoder-Decoder) pré-treinado para OCR de texto manuscrito.
+    Arquitetura: `microsoft/trocr-large-handwritten` (ViT + GPT-2).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    TrOCRProcessor,
+    ViTImageProcessor,
+    VisionEncoderDecoderModel,
+    XLMRobertaTokenizer,
+    mo,
+    torch,
+):
+    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Workaround: usar XLMRobertaTokenizer + ViTImageProcessor em vez de
+    # TrOCRProcessor.from_pretrained() para evitar erro de sentencepiece.
+    _tokenizer = XLMRobertaTokenizer.from_pretrained("microsoft/trocr-large-handwritten")
+    _image_processor = ViTImageProcessor.from_pretrained("microsoft/trocr-large-handwritten")
+    processor_trocr = TrOCRProcessor(image_processor=_image_processor, tokenizer=_tokenizer)
+
+    model_trocr = VisionEncoderDecoderModel.from_pretrained(
+        "microsoft/trocr-large-handwritten"
+    ).to(_device)
+
+    mo.md(f"""
+    ✅ **TrOCR** carregado
+
+    Dispositivo: `{_device}` | Modelo: `trocr-large-handwritten`
     """)
     return
 
