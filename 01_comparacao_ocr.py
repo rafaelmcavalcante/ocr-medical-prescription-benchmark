@@ -135,12 +135,16 @@ def _():
     from paddleocr import PaddleOCR
     from PIL import Image
     from transformers import (
+        AutoModelForMultimodalLM,
+        AutoProcessor,
         RobertaTokenizer,
         VisionEncoderDecoderModel,
         ViTImageProcessor,
     )
 
     return (
+        AutoModelForMultimodalLM,
+        AutoProcessor,
         Image,
         Levenshtein,
         PaddleOCR,
@@ -394,6 +398,34 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## 8.4 Qwen3-VL
+
+    Modelo multimodal (Vision-Language) de 2B parâmetros. Processa a imagem
+    como um todo via chat template, ideal para OCR baseado em instrução.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(AutoModelForMultimodalLM, AutoProcessor, mo, torch):
+    MODELO = "Qwen/Qwen3-VL-2B-Instruct"
+
+    processor_qwen = AutoProcessor.from_pretrained(MODELO)
+    model_qwen = AutoModelForMultimodalLM.from_pretrained(
+        MODELO, device_map="auto", torch_dtype=torch.bfloat16
+    )
+
+    mo.md(f"""
+    ✅ **Qwen3-VL** carregado
+
+    Modelo: `Qwen3-VL-2B-Instruct` | device_map: `auto`
+    """)
+    return model_qwen, processor_qwen
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # 9 Rodando o Experimento
     """)
     return
@@ -473,9 +505,51 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
             return normalizar(text), time.time() - start
         except Exception as e:
             print(f"⚠️  Tesseract [{os.path.basename(caminho_imagem)}]: {e}")
-            return "", time.time() - start
+            return "", 0.0
 
-    return predizer_paddle, predizer_tesseract, predizer_trocr
+
+    def predizer_qwen(caminho_imagem, processor, model):
+        """Qwen3-VL — modelo multimodal para OCR via instrução."""
+        try:
+            start = time.time()
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": f"file://{os.path.abspath(caminho_imagem)}",
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "Transcreva fielmente o nome do medicamento manuscrito nesta imagem. "
+                                "É uma prescrição médica de Bangladesh — o texto pode conter nomes "
+                                "de fármacos, abreviações ou termos técnicos. "
+                                "Retorne apenas o texto transcrito, sem explicações."
+                            ),
+                        },
+                    ],
+                },
+            ]
+            inputs = processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            ).to(model.device)
+
+            outputs = model.generate(**inputs, max_new_tokens=64)
+            text = processor.decode(
+                outputs[0][inputs["input_ids"].shape[-1] :]
+            )
+            return normalizar(text), time.time() - start
+        except Exception as e:
+            print(f"⚠️  Qwen [{os.path.basename(caminho_imagem)}]: {e}")
+            return "", 0.0
+
+    return predizer_paddle, predizer_qwen, predizer_tesseract, predizer_trocr
 
 
 @app.cell(hide_code=True)
@@ -667,6 +741,46 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## 9.6 Qwen3-VL
+
+    Modelo multimodal. Pesado (~4 GB VRAM em bfloat16). Ideal rodar com GPU.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    DIRETORIO_TESTE,
+    VOCABULARIO,
+    df_amostra,
+    mo,
+    model_qwen,
+    partial,
+    predizer_qwen,
+    processor_qwen,
+    rodar_benchmark_ocr,
+):
+    NOME_CSV_QWEN = "resultados_qwen.csv"
+    df_qwen = rodar_benchmark_ocr(
+        nome="Qwen3-VL",
+        predizer=partial(
+            predizer_qwen,
+            processor=processor_qwen,
+            model=model_qwen,
+        ),
+        score_minimo=0.1,
+        csv_saida=NOME_CSV_QWEN,
+        df=df_amostra,
+        diretorio=DIRETORIO_TESTE,
+        vocabulario=VOCABULARIO,
+    )
+    mo.md(f"✅ Qwen3-VL: **{len(df_qwen)}** amostras → `{NOME_CSV_QWEN}`")
+    return (df_qwen,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # 10 Resultados (Tabelas)
 
     As células abaixo carregam os CSVs disponíveis e montam as comparações.
@@ -692,6 +806,7 @@ def _(mo, os, pd):
         ("Tesseract", "resultados_tesseract.csv"),
         ("PaddleOCR", "resultados_paddle.csv"),
         ("TrOCR", "resultados_trocr.csv"),
+        ("Qwen3-VL", "resultados_qwen.csv"),
     ]
 
     dfs_disponiveis = {}
