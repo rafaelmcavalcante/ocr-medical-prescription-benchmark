@@ -84,7 +84,7 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     # 3 Dataset
-    O dataset utilizado é o RxHand
+    O dataset utilizado é o [RxHandBD](https://zenodo.org/records/18478741), que prove uma coleção padronizada e pronta para uso de 5.578 palavras manuscritas extraídas de prescrições médicas.
     """)
     return
 
@@ -130,6 +130,8 @@ def _():
     import pytesseract
     import torch
 
+    from functools import partial
+
     from paddleocr import PaddleOCR
     from PIL import Image
     from transformers import (
@@ -148,6 +150,7 @@ def _():
         cv2,
         jiwer,
         os,
+        partial,
         pd,
         pytesseract,
         time,
@@ -570,18 +573,18 @@ def _(
     predizer_tesseract,
     rodar_benchmark_ocr,
 ):
-    NOME_CSV = "resultados_tesseract.csv"
+    NOME_CSV_TESSERACT = "resultados_tesseract.csv"
     df_tesseract = rodar_benchmark_ocr(
         nome="Tesseract",
         predizer=predizer_tesseract,
-        score_minimo=0.0,
-        csv_saida=NOME_CSV,
+        score_minimo=0.1,
+        csv_saida=NOME_CSV_TESSERACT,
         df=df_amostra,
         diretorio=DIRETORIO_TESTE,
         vocabulario=VOCABULARIO,
     )
-    mo.md(f"✅ Tesseract: **{len(df_tesseract)}** amostras → `{NOME_CSV}`")
-    return (df_tesseract,)
+    mo.md(f"✅ Tesseract: **{len(df_tesseract)}** amostras → `{NOME_CSV_TESSERACT}`")
+    return
 
 
 @app.cell(hide_code=True)
@@ -601,23 +604,22 @@ def _(
     df_amostra,
     mo,
     ocr_paddle,
+    partial,
     predizer_paddle,
     rodar_benchmark_ocr,
 ):
-    from functools import partial
-
-    NOME_CSV = "resultados_paddle.csv"
+    NOME_CSV_PADDLE = "resultados_paddle.csv"
     df_paddle = rodar_benchmark_ocr(
         nome="PaddleOCR",
         predizer=partial(predizer_paddle, ocr=ocr_paddle),
-        score_minimo=0.75,
-        csv_saida=NOME_CSV,
+        score_minimo=0.1,
+        csv_saida=NOME_CSV_PADDLE,
         df=df_amostra,
         diretorio=DIRETORIO_TESTE,
         vocabulario=VOCABULARIO,
     )
-    mo.md(f"✅ PaddleOCR: **{len(df_paddle)}** amostras → `{NOME_CSV}`")
-    return (df_paddle,)
+    mo.md(f"✅ PaddleOCR: **{len(df_paddle)}** amostras → `{NOME_CSV_PADDLE}`")
+    return
 
 
 @app.cell(hide_code=True)
@@ -638,13 +640,12 @@ def _(
     image_processor_trocr,
     mo,
     model_trocr,
+    partial,
     predizer_trocr,
     rodar_benchmark_ocr,
     tokenizer_trocr,
 ):
-    from functools import partial
-
-    NOME_CSV = "resultados_trocr.csv"
+    NOME_CSV_TROCR = "resultados_trocr.csv"
     df_trocr = rodar_benchmark_ocr(
         nome="TrOCR",
         predizer=partial(
@@ -654,13 +655,13 @@ def _(
             model=model_trocr,
         ),
         score_minimo=0.1,
-        csv_saida=NOME_CSV,
+        csv_saida=NOME_CSV_TROCR,
         df=df_amostra,
         diretorio=DIRETORIO_TESTE,
         vocabulario=VOCABULARIO,
     )
-    mo.md(f"✅ TrOCR: **{len(df_trocr)}** amostras → `{NOME_CSV}`")
-    return (df_trocr,)
+    mo.md(f"✅ TrOCR: **{len(df_trocr)}** amostras → `{NOME_CSV_TROCR}`")
+    return
 
 
 @app.cell(hide_code=True)
@@ -749,7 +750,7 @@ def _(dfs_disponiveis, mo, pd):
 
         df_painel = pd.DataFrame(linhas)
         mo.ui.table(df_painel)
-    return (df_painel,)
+    return
 
 
 @app.cell(hide_code=True)
