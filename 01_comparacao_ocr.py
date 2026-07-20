@@ -1,3 +1,23 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "accelerate>=1.14.0",
+#     "jiwer>=4.0.0",
+#     "marimo>=0.23.14",
+#     "matplotlib>=3.10.9",
+#     "numpy>=2.2.6",
+#     "opencv-python>=5.0.0.93",
+#     "paddleocr>=3.7.0",
+#     "pandas>=2.3.3",
+#     "pillow>=12.3.0",
+#     "pytesseract>=0.3.13",
+#     "python-levenshtein>=0.27.3",
+#     "torch>=2.13.0",
+#     "torchvision>=0.28.0",
+#     "transformers>=5.14.1",
+# ]
+# ///
+
 import marimo
 
 __generated_with = "0.23.14"
@@ -102,6 +122,8 @@ def _(mo):
 @app.cell
 def _():
     import os
+    import time
+    import cv2
     import jiwer
     import Levenshtein
     import pandas as pd
@@ -111,23 +133,24 @@ def _():
     from paddleocr import PaddleOCR
     from PIL import Image
     from transformers import (
-        TrOCRProcessor,
+        RobertaTokenizer,
         VisionEncoderDecoderModel,
         ViTImageProcessor,
-        XLMRobertaTokenizer,
     )
 
     return (
+        Image,
         Levenshtein,
         PaddleOCR,
-        TrOCRProcessor,
+        RobertaTokenizer,
         ViTImageProcessor,
         VisionEncoderDecoderModel,
-        XLMRobertaTokenizer,
+        cv2,
         jiwer,
         os,
         pd,
         pytesseract,
+        time,
         torch,
     )
 
@@ -177,7 +200,7 @@ def _(mo, os, pd):
     | Total treino (Train_Set) | **{len(df_train):,}** imagens |
     | Total teste (Test_Set) | **{len(df_test):,}** imagens |
     """)
-    return
+    return DIRETORIO_TESTE, VOCABULARIO, df_amostra
 
 
 @app.cell(hide_code=True)
@@ -236,17 +259,17 @@ def _(Levenshtein, jiwer):
 
         return (lev_dist, lev_ratio, cer, wer, word_acc, word_acc_80)
 
-    return (normalizar,)
+    return calcular_metricas, normalizar
 
 
 @app.cell(hide_code=True)
 def _(Levenshtein, normalizar):
-    def corrigir_fuzzy(texto_ocr: str, vocabulario: list[str], limiar: float = 0.0) -> str:
+    def corrigir_fuzzy(texto_ocr: str, vocabulario: list[str], score_minimo: float = 0.0) -> str:
         """
         Corrige texto via fuzzy matching contra um vocabulário conhecido.
 
         Usa similaridade normalizada de Levenshtein. Se nenhum termo
-        atingir o limiar, retorna o texto original sem alteração.
+        atingir o score_minimo, retorna o texto original sem alteração.
         """
         texto_ocr = normalizar(texto_ocr)
         # Remove ruídos comuns de OCR (pontuação isolada)
@@ -264,9 +287,9 @@ def _(Levenshtein, normalizar):
                 melhor_score = score
                 melhor_termo = normalizar(termo)
 
-        return melhor_termo if melhor_score >= limiar else texto_ocr
+        return melhor_termo if melhor_score >= score_minimo else texto_ocr
 
-    return
+    return (corrigir_fuzzy,)
 
 
 @app.cell(hide_code=True)
@@ -328,7 +351,7 @@ def _(PaddleOCR, mo, torch):
 
     Dispositivo: `{_device}` | Engine: `transformers`
     """)
-    return
+    return (ocr_paddle,)
 
 
 @app.cell(hide_code=True)
@@ -344,31 +367,25 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    TrOCRProcessor,
+    RobertaTokenizer,
     ViTImageProcessor,
     VisionEncoderDecoderModel,
-    XLMRobertaTokenizer,
     mo,
     torch,
 ):
-    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    MODELO = "microsoft/trocr-large-handwritten"
 
-    # Workaround: usar XLMRobertaTokenizer + ViTImageProcessor em vez de
-    # TrOCRProcessor.from_pretrained() para evitar erro de sentencepiece.
-    _tokenizer = XLMRobertaTokenizer.from_pretrained("microsoft/trocr-large-handwritten")
-    _image_processor = ViTImageProcessor.from_pretrained("microsoft/trocr-large-handwritten")
-    processor_trocr = TrOCRProcessor(image_processor=_image_processor, tokenizer=_tokenizer)
-
-    model_trocr = VisionEncoderDecoderModel.from_pretrained(
-        "microsoft/trocr-large-handwritten"
-    ).to(_device)
+    image_processor_trocr = ViTImageProcessor.from_pretrained(MODELO)
+    tokenizer_trocr = RobertaTokenizer.from_pretrained(MODELO)
+    model_trocr = VisionEncoderDecoderModel.from_pretrained(MODELO).to(device)
 
     mo.md(f"""
     ✅ **TrOCR** carregado
 
-    Dispositivo: `{_device}` | Modelo: `trocr-large-handwritten`
+    Dispositivo: `{device}` | Modelo: `trocr-large-handwritten`
     """)
-    return
+    return image_processor_trocr, model_trocr, tokenizer_trocr
 
 
 @app.cell(hide_code=True)
@@ -382,9 +399,357 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # 10 Resultados (Tabelas)
+    ## 9.1 Funções de Predição
+
+    Cada OCR tem sua própria função de predição com assinatura padronizada:
+    `(caminho_imagem) → (texto_predito, tempo_segundos)`.
+
+    Para adicionar um novo OCR, basta criar uma função com essa assinatura
+    e registrá-la no dicionário `MOTORES_OCR` na célula seguinte.
     """)
     return
+
+
+@app.cell(hide_code=True)
+def _(Image, cv2, normalizar, os, pytesseract, time):
+    # ──────────────────────────────────────────────────────────
+    # Funções de predição — uma por motor de OCR
+    # Assinatura: (caminho_imagem, ...) -> (texto, tempo)
+    # ──────────────────────────────────────────────────────────
+
+    def predizer_trocr(caminho_imagem, image_processor, tokenizer, model):
+        """TrOCR — modelo Transformer para texto manuscrito."""
+        try:
+            start = time.time()
+            image = Image.open(caminho_imagem).convert("RGB")
+            pixel_values = image_processor(images=image, return_tensors="pt").pixel_values
+            pixel_values = pixel_values.to(model.device)
+            generated_ids = model.generate(pixel_values, max_new_tokens=64)
+            text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            return normalizar(text), time.time() - start
+        except Exception as e:
+            print(f"⚠️  TrOCR [{os.path.basename(caminho_imagem)}]: {e}")
+            return "", 0.0
+
+
+    def predizer_paddle(caminho_imagem, ocr):
+        """PaddleOCR — PP-OCRv6 com detector + recognizer integrados."""
+        start = time.time()
+        try:
+            img = cv2.imread(caminho_imagem)
+            if img is None:
+                return "", time.time() - start
+
+            resultado = ocr.predict(img)
+            if not resultado or not isinstance(resultado, list):
+                return "", time.time() - start
+
+            textos = []
+            for res in resultado:
+                if hasattr(res, "rec_texts") and res.rec_texts:
+                    for t in res.rec_texts:
+                        if str(t).strip():
+                            textos.append(str(t).strip())
+                elif isinstance(res, dict) and "rec_texts" in res:
+                    for t in res["rec_texts"]:
+                        if str(t).strip():
+                            textos.append(str(t).strip())
+
+            return " ".join(textos).strip().lower(), time.time() - start
+        except Exception as e:
+            print(f"⚠️  PaddleOCR [{os.path.basename(caminho_imagem)}]: {e}")
+            return "", time.time() - start
+
+
+    def predizer_tesseract(caminho_imagem):
+        """Tesseract — engine clássica de OCR."""
+        start = time.time()
+        try:
+            image = Image.open(caminho_imagem)
+            text = pytesseract.image_to_string(image)
+            return normalizar(text), time.time() - start
+        except Exception as e:
+            print(f"⚠️  Tesseract [{os.path.basename(caminho_imagem)}]: {e}")
+            return "", time.time() - start
+
+    return predizer_paddle, predizer_tesseract, predizer_trocr
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 9.2 Função Auxiliar de Benchmark
+
+    Executa o benchmark para **um único motor de OCR** e salva o CSV.
+    Cada motor tem sua própria célula de execução abaixo — rode apenas os que quiser.
+
+    **Para adicionar um novo OCR:**
+    1. Crie a função `predizer_*` na célula 9.1
+    2. Copie uma das células 9.3–9.5 e ajuste os parâmetros
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(calcular_metricas, corrigir_fuzzy, normalizar, os, pd):
+    def rodar_benchmark_ocr(
+        nome, predizer, score_minimo, csv_saida, df, diretorio, vocabulario
+    ):
+        """Roda benchmark para um único motor OCR e salva CSV."""
+        resultados = []
+        total = len(df)
+        print(f"[{nome}] Iniciando benchmark em {total} imagens...")
+
+        for idx, linha in df.iterrows():
+            gabarito = normalizar(linha["Text"])
+            caminho = os.path.join(diretorio, str(linha["Images"]))
+
+            if not os.path.exists(caminho):
+                continue
+
+            pred_raw, tempo = predizer(caminho)
+            pred_raw = normalizar(pred_raw)
+            pred_fuzzy = corrigir_fuzzy(
+                pred_raw, vocabulario, score_minimo=score_minimo
+            )
+            pred_fuzzy = normalizar(pred_fuzzy)
+
+            lev_d, lev_r, cer, wer, acc, acc80 = calcular_metricas(gabarito, pred_raw)
+            lev_df, lev_rf, cer_f, wer_f, acc_f, acc80_f = calcular_metricas(
+                gabarito, pred_fuzzy
+            )
+
+            resultados.append({
+                "Arquivo": os.path.basename(caminho),
+                "Gabarito": gabarito,
+                "Predicao_Raw": pred_raw,
+                "Predicao_Fuzzy": pred_fuzzy,
+                "Levenshtein_Raw": lev_d,
+                "Levenshtein_Fuzzy": lev_df,
+                "Similaridade_Raw": lev_r,
+                "Similaridade_Fuzzy": lev_rf,
+                "CER_Raw": cer,
+                "CER_Fuzzy": cer_f,
+                "WER_Raw": wer,
+                "WER_Fuzzy": wer_f,
+                "Accuracy_Raw": acc,
+                "Accuracy80_Raw": acc80,
+                "Accuracy_Fuzzy": acc_f,
+                "Accuracy80_Fuzzy": acc80_f,
+                "Tempo_Inferencia": tempo,
+            })
+
+            if (idx + 1) % 50 == 0:
+                print(f"  [{nome}] {idx + 1}/{total} imagens...")
+
+        df_resultado = pd.DataFrame(resultados)
+        df_resultado.to_csv(csv_saida, index=False, encoding="utf-8")
+        print(f"[{nome}] ✅ {len(df_resultado)} amostras → {csv_saida}")
+        return df_resultado
+
+    return (rodar_benchmark_ocr,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 9.3 Tesseract
+
+    OCR clássico. Rápido, roda localmente sem GPU.
+    ⚠️ Requer `tesseract-ocr` instalado no sistema.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    DIRETORIO_TESTE,
+    VOCABULARIO,
+    df_amostra,
+    mo,
+    predizer_tesseract,
+    rodar_benchmark_ocr,
+):
+    NOME_CSV = "resultados_tesseract.csv"
+    df_tesseract = rodar_benchmark_ocr(
+        nome="Tesseract",
+        predizer=predizer_tesseract,
+        score_minimo=0.0,
+        csv_saida=NOME_CSV,
+        df=df_amostra,
+        diretorio=DIRETORIO_TESTE,
+        vocabulario=VOCABULARIO,
+    )
+    mo.md(f"✅ Tesseract: **{len(df_tesseract)}** amostras → `{NOME_CSV}`")
+    return (df_tesseract,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 9.4 PaddleOCR
+
+    PP-OCRv6 com detector + recognizer. Requer GPU para desempenho aceitável.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    DIRETORIO_TESTE,
+    VOCABULARIO,
+    df_amostra,
+    mo,
+    ocr_paddle,
+    predizer_paddle,
+    rodar_benchmark_ocr,
+):
+    from functools import partial
+
+    NOME_CSV = "resultados_paddle.csv"
+    df_paddle = rodar_benchmark_ocr(
+        nome="PaddleOCR",
+        predizer=partial(predizer_paddle, ocr=ocr_paddle),
+        score_minimo=0.75,
+        csv_saida=NOME_CSV,
+        df=df_amostra,
+        diretorio=DIRETORIO_TESTE,
+        vocabulario=VOCABULARIO,
+    )
+    mo.md(f"✅ PaddleOCR: **{len(df_paddle)}** amostras → `{NOME_CSV}`")
+    return (df_paddle,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 9.5 TrOCR
+
+    Transformer Encoder-Decoder (ViT + GPT-2). Modelo pesado, ideal rodar com GPU.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    DIRETORIO_TESTE,
+    VOCABULARIO,
+    df_amostra,
+    image_processor_trocr,
+    mo,
+    model_trocr,
+    predizer_trocr,
+    rodar_benchmark_ocr,
+    tokenizer_trocr,
+):
+    from functools import partial
+
+    NOME_CSV = "resultados_trocr.csv"
+    df_trocr = rodar_benchmark_ocr(
+        nome="TrOCR",
+        predizer=partial(
+            predizer_trocr,
+            image_processor=image_processor_trocr,
+            tokenizer=tokenizer_trocr,
+            model=model_trocr,
+        ),
+        score_minimo=0.1,
+        csv_saida=NOME_CSV,
+        df=df_amostra,
+        diretorio=DIRETORIO_TESTE,
+        vocabulario=VOCABULARIO,
+    )
+    mo.md(f"✅ TrOCR: **{len(df_trocr)}** amostras → `{NOME_CSV}`")
+    return (df_trocr,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # 10 Resultados (Tabelas)
+
+    As células abaixo carregam os CSVs disponíveis e montam as comparações.
+    Rode os benchmarks que quiser (9.3–9.5) e depois venha aqui.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 10.1 Amostra de Predições
+
+    Primeiras linhas de cada CSV disponível.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, os, pd):
+    # Detecta quais CSVs de resultado existem
+    CSVS_PADRAO = [
+        ("Tesseract", "resultados_tesseract.csv"),
+        ("PaddleOCR", "resultados_paddle.csv"),
+        ("TrOCR", "resultados_trocr.csv"),
+    ]
+
+    dfs_disponiveis = {}
+    for nome, csv_path in CSVS_PADRAO:
+        if os.path.exists(csv_path):
+            df = pd.read_csv(csv_path)
+            dfs_disponiveis[nome] = df
+
+    if not dfs_disponiveis:
+        mo.md("⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.5 primeiro.")
+    else:
+        mo.md(f"📂 CSVs encontrados: **{', '.join(dfs_disponiveis.keys())}**")
+
+        for nome, df in dfs_disponiveis.items():
+            mo.md(f"### {nome}")
+            mo.ui.table(
+                df[["Arquivo", "Gabarito", "Predicao_Raw", "Predicao_Fuzzy"]].head(5)
+            )
+    return (dfs_disponiveis,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 10.2 Painel Comparativo
+
+    Resumo agregado das métricas — todos os motores lado a lado.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(dfs_disponiveis, mo, pd):
+    def fmt_pct(v):
+        return round(v * 100, 2)
+
+    def fmt_abs(v):
+        return round(v, 2)
+
+    if not dfs_disponiveis:
+        mo.md("⚠️  Nenhum dado para comparar.")
+    else:
+        linhas = []
+        for nome, df in dfs_disponiveis.items():
+            for variante in ("Raw", "Fuzzy"):
+                linhas.append({
+                    "Motor": nome,
+                    "Variante": variante,
+                    "Word Acc (%)": fmt_pct(df[f"Accuracy_{variante}"].mean()),
+                    "Acc @80% (%)": fmt_pct(df[f"Accuracy80_{variante}"].mean()),
+                    "Lev Médio": fmt_abs(df[f"Levenshtein_{variante}"].mean()),
+                    "CER (%)": fmt_pct(df[f"CER_{variante}"].mean()),
+                    "WER (%)": fmt_pct(df[f"WER_{variante}"].mean()),
+                    "Tempo Médio (s)": fmt_abs(df["Tempo_Inferencia"].mean()),
+                })
+
+        df_painel = pd.DataFrame(linhas)
+        mo.ui.table(df_painel)
+    return (df_painel,)
 
 
 @app.cell(hide_code=True)

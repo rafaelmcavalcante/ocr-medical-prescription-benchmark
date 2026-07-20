@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Resultados de benchmark (gerados ao rodar)
+resultados_benchmark_ocr.csv
+
+# Cache de modelos (baixados automaticamente)
+.paddleocr/
+__marimo__/session/
