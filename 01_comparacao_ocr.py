@@ -35,7 +35,7 @@ def _():
 def _(mo):
     mo.md(r"""
     # 1 Introdução
-    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte de um projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de quatro alternativas de OCR: Tesseract, PaddleOCR, TrOCR e LLaVA.
+    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte de um projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de quatro alternativas de OCR: Tesseract, PaddleOCR, TrOCR e Qwen3-VL.
     """)
     return
 
@@ -75,7 +75,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2.4 LLaVA
+    ## 2.4 Qwen3-VL
     """)
     return
 
@@ -171,9 +171,50 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, os, pd):
-    # ── Caminhos do dataset (já extraído em RxHandBD) ──
+def _(mo):
+    mo.md(r"""
+    ## 6.1 Download (se necessário)
+
+    Se a pasta `RxHandBD/` não existir, o dataset será baixado automaticamente.
+    Preencha o link abaixo com o seu arquivo `.zip` (Google Drive, Zenodo, etc.).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, os):
+    import urllib.request
+    import zipfile
+
+    # Substitua pelo link do seu zip (Google Drive ou URL direta)
+    DATASET_URL = "https://drive.google.com/file/d/1l6f9mAehHoBySLmWuIsn4Af833EAX54o/view?usp=sharing"
     DATASET_DIR = "RxHandBD"
+
+    if not os.path.exists(DATASET_DIR):
+        zip_path = "RxHandBD.zip"
+        if not os.path.exists(zip_path):
+            mo.md("Baixando dataset...")
+            if "drive.google.com" in DATASET_URL:
+                try:
+                    import gdown
+                    gdown.download(DATASET_URL, zip_path, quiet=False)
+                except ImportError:
+                    raise ImportError(
+                        "Para links do Google Drive, instale gdown: pip install gdown"
+                    )
+            else:
+                urllib.request.urlretrieve(DATASET_URL, zip_path)
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(".")
+        mo.md("Dataset extraído!")
+    else:
+        mo.md("Dataset já existe localmente.")
+    return (DATASET_DIR,)
+
+
+@app.cell(hide_code=True)
+def _(DATASET_DIR, mo, os, pd):
+    # ── Caminhos do dataset ──
     CAMINHO_CSV_TREINO = os.path.join(DATASET_DIR, "Train_Label.csv")
     CAMINHO_CSV_TESTE = os.path.join(DATASET_DIR, "Test_Labels.csv")
     DIRETORIO_TREINO = os.path.join(DATASET_DIR, "Train_Set")
@@ -208,6 +249,27 @@ def _(mo, os, pd):
     | Total teste (Test_Set) | **{len(df_test):,}** imagens |
     """)
     return DIRETORIO_TESTE, VOCABULARIO, df_amostra
+
+
+@app.cell(hide_code=True)
+def _(DIRETORIO_TESTE, df_amostra, mo, os):
+    mo.md("### Exemplos do dataset")
+
+    linhas = []
+    amostra_exemplos = df_amostra.head(8)
+    for i in range(0, 8, 4):
+        cells = []
+        for j in range(i, min(i + 4, 8)):
+            row = amostra_exemplos.iloc[j]
+            caminho_img = os.path.join(DIRETORIO_TESTE, str(row["Images"]))
+            if os.path.exists(caminho_img):
+                cells.append(
+                    mo.image(caminho_img, width=120, caption=str(row["Text"]))
+                )
+        if cells:
+            linhas.append(mo.hstack(cells, gap=0.5))
+    mo.vstack(linhas)
+    return
 
 
 @app.cell(hide_code=True)
@@ -322,7 +384,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo, pytesseract):
     mo.md(f"""
-    ✅ **Tesseract** carregado
+    **Tesseract** carregado
 
     Versão: `pytesseract {pytesseract.__version__}`
     """)
@@ -354,7 +416,7 @@ def _(PaddleOCR, mo, torch):
     )
 
     mo.md(f"""
-    ✅ **PaddleOCR** carregado
+    **PaddleOCR** carregado
 
     Dispositivo: `{_device}` | Engine: `transformers`
     """)
@@ -381,14 +443,14 @@ def _(
     torch,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    MODELO = "microsoft/trocr-large-handwritten"
+    MODELO_TROCR = "microsoft/trocr-large-handwritten"
 
-    image_processor_trocr = ViTImageProcessor.from_pretrained(MODELO)
-    tokenizer_trocr = RobertaTokenizer.from_pretrained(MODELO)
-    model_trocr = VisionEncoderDecoderModel.from_pretrained(MODELO).to(device)
+    image_processor_trocr = ViTImageProcessor.from_pretrained(MODELO_TROCR)
+    tokenizer_trocr = RobertaTokenizer.from_pretrained(MODELO_TROCR)
+    model_trocr = VisionEncoderDecoderModel.from_pretrained(MODELO_TROCR).to(device)
 
     mo.md(f"""
-    ✅ **TrOCR** carregado
+    **TrOCR** carregado
 
     Dispositivo: `{device}` | Modelo: `trocr-large-handwritten`
     """)
@@ -400,25 +462,25 @@ def _(mo):
     mo.md(r"""
     ## 8.4 Qwen3-VL
 
-    Modelo multimodal (Vision-Language) de 2B parâmetros. Processa a imagem
+    Modelo multimodal (Vision-Language) de 8B parâmetros. Processa a imagem
     como um todo via chat template, ideal para OCR baseado em instrução.
     """)
     return
 
 
 @app.cell(hide_code=True)
-def _(AutoModelForMultimodalLM, AutoProcessor, mo, torch):
-    MODELO = "Qwen/Qwen3-VL-2B-Instruct"
+def _(AutoModelForMultimodalLM, AutoProcessor, mo):
+    MODELO_QWEN = "Qwen/Qwen3-VL-8B-Instruct"
 
-    processor_qwen = AutoProcessor.from_pretrained(MODELO)
+    processor_qwen = AutoProcessor.from_pretrained(MODELO_QWEN)
     model_qwen = AutoModelForMultimodalLM.from_pretrained(
-        MODELO, device_map="auto", torch_dtype=torch.bfloat16
+        MODELO_QWEN, device_map="auto"
     )
 
     mo.md(f"""
-    ✅ **Qwen3-VL** carregado
+    **Qwen3-VL** carregado
 
-    Modelo: `Qwen3-VL-2B-Instruct` | device_map: `auto`
+    Modelo: `Qwen3-VL-8B-Instruct` | device_map: `auto`
     """)
     return model_qwen, processor_qwen
 
@@ -463,7 +525,7 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
             text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
             return normalizar(text), time.time() - start
         except Exception as e:
-            print(f"⚠️  TrOCR [{os.path.basename(caminho_imagem)}]: {e}")
+            print(f" TrOCR [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0
 
 
@@ -492,7 +554,7 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
 
             return " ".join(textos).strip().lower(), time.time() - start
         except Exception as e:
-            print(f"⚠️  PaddleOCR [{os.path.basename(caminho_imagem)}]: {e}")
+            print(f" PaddleOCR [{os.path.basename(caminho_imagem)}]: {e}")
             return "", time.time() - start
 
 
@@ -504,7 +566,7 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
             text = pytesseract.image_to_string(image)
             return normalizar(text), time.time() - start
         except Exception as e:
-            print(f"⚠️  Tesseract [{os.path.basename(caminho_imagem)}]: {e}")
+            print(f" Tesseract [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0
 
 
@@ -512,21 +574,20 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
         """Qwen3-VL — modelo multimodal para OCR via instrução."""
         try:
             start = time.time()
+            image = Image.open(caminho_imagem).convert("RGB")
             messages = [
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "image",
-                            "image": f"file://{os.path.abspath(caminho_imagem)}",
-                        },
+                        {"type": "image", "image": image},
                         {
                             "type": "text",
                             "text": (
                                 "Transcreva fielmente o nome do medicamento manuscrito nesta imagem. "
                                 "É uma prescrição médica de Bangladesh — o texto pode conter nomes "
                                 "de fármacos, abreviações ou termos técnicos. "
-                                "Retorne apenas o texto transcrito, sem explicações."
+                                "Retorne apenas o texto transcrito, usando somente caracteres latinos (A-Z). "
+                                "Sem explicações."
                             ),
                         },
                     ],
@@ -542,11 +603,12 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
 
             outputs = model.generate(**inputs, max_new_tokens=64)
             text = processor.decode(
-                outputs[0][inputs["input_ids"].shape[-1] :]
+                outputs[0][inputs["input_ids"].shape[-1] :],
+                skip_special_tokens=True,
             )
             return normalizar(text), time.time() - start
         except Exception as e:
-            print(f"⚠️  Qwen [{os.path.basename(caminho_imagem)}]: {e}")
+            print(f" Qwen [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0
 
     return predizer_paddle, predizer_qwen, predizer_tesseract, predizer_trocr
@@ -621,7 +683,7 @@ def _(calcular_metricas, corrigir_fuzzy, normalizar, os, pd):
 
         df_resultado = pd.DataFrame(resultados)
         df_resultado.to_csv(csv_saida, index=False, encoding="utf-8")
-        print(f"[{nome}] ✅ {len(df_resultado)} amostras → {csv_saida}")
+        print(f"[{nome}]  {len(df_resultado)} amostras → {csv_saida}")
         return df_resultado
 
     return (rodar_benchmark_ocr,)
@@ -657,7 +719,7 @@ def _(
         diretorio=DIRETORIO_TESTE,
         vocabulario=VOCABULARIO,
     )
-    mo.md(f"✅ Tesseract: **{len(df_tesseract)}** amostras → `{NOME_CSV_TESSERACT}`")
+    mo.md(f"Tesseract: **{len(df_tesseract)}** amostras → `{NOME_CSV_TESSERACT}`")
     return
 
 
@@ -692,7 +754,7 @@ def _(
         diretorio=DIRETORIO_TESTE,
         vocabulario=VOCABULARIO,
     )
-    mo.md(f"✅ PaddleOCR: **{len(df_paddle)}** amostras → `{NOME_CSV_PADDLE}`")
+    mo.md(f"PaddleOCR: **{len(df_paddle)}** amostras → `{NOME_CSV_PADDLE}`")
     return
 
 
@@ -734,7 +796,7 @@ def _(
         diretorio=DIRETORIO_TESTE,
         vocabulario=VOCABULARIO,
     )
-    mo.md(f"✅ TrOCR: **{len(df_trocr)}** amostras → `{NOME_CSV_TROCR}`")
+    mo.md(f"TrOCR: **{len(df_trocr)}** amostras → `{NOME_CSV_TROCR}`")
     return
 
 
@@ -743,7 +805,7 @@ def _(mo):
     mo.md(r"""
     ## 9.6 Qwen3-VL
 
-    Modelo multimodal. Pesado (~4 GB VRAM em bfloat16). Ideal rodar com GPU.
+    Modelo multimodal de 8B. Pesado (~16 GB VRAM). Ideal rodar com GPU.
     """)
     return
 
@@ -774,8 +836,8 @@ def _(
         diretorio=DIRETORIO_TESTE,
         vocabulario=VOCABULARIO,
     )
-    mo.md(f"✅ Qwen3-VL: **{len(df_qwen)}** amostras → `{NOME_CSV_QWEN}`")
-    return (df_qwen,)
+    mo.md(f"Qwen3-VL: **{len(df_qwen)}** amostras → `{NOME_CSV_QWEN}`")
+    return
 
 
 @app.cell(hide_code=True)
@@ -784,9 +846,21 @@ def _(mo):
     # 10 Resultados (Tabelas)
 
     As células abaixo carregam os CSVs disponíveis e montam as comparações.
-    Rode os benchmarks que quiser (9.3–9.5) e depois venha aqui.
+    Rode os benchmarks que quiser (9.3–9.6) e depois venha aqui.
     """)
     return
+
+
+@app.cell(hide_code=True)
+def _():
+    # Lista centralizada de CSVs — usada pelas tabelas (10) e gráficos (11)
+    CSVS_RESULTADO = [
+        ("Tesseract", "resultados_tesseract.csv"),
+        ("PaddleOCR", "resultados_paddle.csv"),
+        ("TrOCR", "resultados_trocr.csv"),
+        ("Qwen3-VL", "resultados_qwen.csv"),
+    ]
+    return (CSVS_RESULTADO,)
 
 
 @app.cell(hide_code=True)
@@ -800,30 +874,23 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, os, pd):
+def _(CSVS_RESULTADO, mo, os, pd):
     # Detecta quais CSVs de resultado existem
-    CSVS_PADRAO = [
-        ("Tesseract", "resultados_tesseract.csv"),
-        ("PaddleOCR", "resultados_paddle.csv"),
-        ("TrOCR", "resultados_trocr.csv"),
-        ("Qwen3-VL", "resultados_qwen.csv"),
-    ]
-
     dfs_disponiveis = {}
-    for nome, csv_path in CSVS_PADRAO:
-        if os.path.exists(csv_path):
-            df = pd.read_csv(csv_path)
-            dfs_disponiveis[nome] = df
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            dfs_disponiveis[_nome] = _df
 
     if not dfs_disponiveis:
         mo.md("⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.5 primeiro.")
     else:
-        mo.md(f"📂 CSVs encontrados: **{', '.join(dfs_disponiveis.keys())}**")
+        mo.md(f"CSVs encontrados: **{', '.join(dfs_disponiveis.keys())}**")
 
-        for nome, df in dfs_disponiveis.items():
-            mo.md(f"### {nome}")
+        for _nome, _df in dfs_disponiveis.items():
+            mo.md(f"### {_nome}")
             mo.ui.table(
-                df[["Arquivo", "Gabarito", "Predicao_Raw", "Predicao_Fuzzy"]].head(5)
+                _df[["Arquivo", "Gabarito", "Predicao_Raw", "Predicao_Fuzzy"]].head(5)
             )
     return (dfs_disponiveis,)
 
@@ -847,20 +914,20 @@ def _(dfs_disponiveis, mo, pd):
         return round(v, 2)
 
     if not dfs_disponiveis:
-        mo.md("⚠️  Nenhum dado para comparar.")
+        mo.md(" Nenhum dado para comparar.")
     else:
         linhas = []
-        for nome, df in dfs_disponiveis.items():
+        for _nome, _df in dfs_disponiveis.items():
             for variante in ("Raw", "Fuzzy"):
                 linhas.append({
-                    "Motor": nome,
+                    "Motor": _nome,
                     "Variante": variante,
-                    "Word Acc (%)": fmt_pct(df[f"Accuracy_{variante}"].mean()),
-                    "Acc @80% (%)": fmt_pct(df[f"Accuracy80_{variante}"].mean()),
-                    "Lev Médio": fmt_abs(df[f"Levenshtein_{variante}"].mean()),
-                    "CER (%)": fmt_pct(df[f"CER_{variante}"].mean()),
-                    "WER (%)": fmt_pct(df[f"WER_{variante}"].mean()),
-                    "Tempo Médio (s)": fmt_abs(df["Tempo_Inferencia"].mean()),
+                    "Word Acc (%)": fmt_pct(_df[f"Accuracy_{variante}"].mean()),
+                    "Acc @80% (%)": fmt_pct(_df[f"Accuracy80_{variante}"].mean()),
+                    "Lev Médio": fmt_abs(_df[f"Levenshtein_{variante}"].mean()),
+                    "CER (%)": fmt_pct(_df[f"CER_{variante}"].mean()),
+                    "WER (%)": fmt_pct(_df[f"WER_{variante}"].mean()),
+                    "Tempo Médio (s)": fmt_abs(_df["Tempo_Inferencia"].mean()),
                 })
 
         df_painel = pd.DataFrame(linhas)
@@ -872,7 +939,137 @@ def _(dfs_disponiveis, mo, pd):
 def _(mo):
     mo.md(r"""
     # 11 Resultados (Gráficos)
+
+    Gráficos de barras agrupadas comparando Raw vs Fuzzy para cada motor.
+    Detecta automaticamente os CSVs disponíveis na pasta.
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.1 Word Accuracy
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(CSVS_RESULTADO, mo, np, os, pd, plt):
+
+    # Carregar CSVs disponíveis
+    _nomes = []
+    _raw_acc = []
+    _fuzzy_acc = []
+    _raw_acc80 = []
+    _fuzzy_acc80 = []
+
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            _nomes.append(_nome)
+            _raw_acc.append(_df["Accuracy_Raw"].mean() * 100)
+            _fuzzy_acc.append(_df["Accuracy_Fuzzy"].mean() * 100)
+            _raw_acc80.append(_df["Accuracy80_Raw"].mean() * 100)
+            _fuzzy_acc80.append(_df["Accuracy80_Fuzzy"].mean() * 100)
+
+    if not _nomes:
+        mo.md(" Nenhum CSV de resultado encontrado. Rode as células 9.3–9.6 primeiro.")
+    else:
+        _x = np.arange(len(_nomes))
+        _w = 0.35
+
+        _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+        # Word Accuracy
+        _ax1.bar(_x - _w / 2, _raw_acc, _w, label="Raw", color="#4C72B0")
+        _ax1.bar(_x + _w / 2, _fuzzy_acc, _w, label="Fuzzy", color="#DD8452")
+        _ax1.set_ylabel("%")
+        _ax1.set_title("Word Accuracy")
+        _ax1.set_xticks(_x)
+        _ax1.set_xticklabels(_nomes, rotation=20, ha="right")
+        _ax1.legend()
+        _ax1.set_ylim(0, 105)
+        for _i, (_r, _f) in enumerate(zip(_raw_acc, _fuzzy_acc)):
+            _ax1.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
+            _ax1.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+
+        # Acc @80%
+        _ax2.bar(_x - _w / 2, _raw_acc80, _w, label="Raw", color="#4C72B0")
+        _ax2.bar(_x + _w / 2, _fuzzy_acc80, _w, label="Fuzzy", color="#DD8452")
+        _ax2.set_ylabel("%")
+        _ax2.set_title("Word Accuracy @80%")
+        _ax2.set_xticks(_x)
+        _ax2.set_xticklabels(_nomes, rotation=20, ha="right")
+        _ax2.legend()
+        _ax2.set_ylim(0, 105)
+        for _i, (_r, _f) in enumerate(zip(_raw_acc80, _fuzzy_acc80)):
+            _ax2.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
+            _ax2.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+
+        plt.tight_layout()
+        mo.mpl.interactive(_fig)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.2 Levenshtein e CER
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(CSVS_RESULTADO, mo, np, os, pd, plt):
+
+    _nomes = []
+    _raw_lev = []
+    _fuzzy_lev = []
+    _raw_cer = []
+    _fuzzy_cer = []
+
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            _nomes.append(_nome)
+            _raw_lev.append(_df["Levenshtein_Raw"].mean())
+            _fuzzy_lev.append(_df["Levenshtein_Fuzzy"].mean())
+            _raw_cer.append(_df["CER_Raw"].mean() * 100)
+            _fuzzy_cer.append(_df["CER_Fuzzy"].mean() * 100)
+
+    if _nomes:
+        _x = np.arange(len(_nomes))
+        _w = 0.35
+
+        _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+        # Levenshtein Médio
+        _ax1.bar(_x - _w / 2, _raw_lev, _w, label="Raw", color="#4C72B0")
+        _ax1.bar(_x + _w / 2, _fuzzy_lev, _w, label="Fuzzy", color="#DD8452")
+        _ax1.set_ylabel("Distância")
+        _ax1.set_title("Levenshtein Médio (menor = melhor)")
+        _ax1.set_xticks(_x)
+        _ax1.set_xticklabels(_nomes, rotation=20, ha="right")
+        _ax1.legend()
+        for _i, (_r, _f) in enumerate(zip(_raw_lev, _fuzzy_lev)):
+            _ax1.text(_i - _w / 2, _r + 0.1, f"{_r:.1f}", ha="center", fontsize=8)
+            _ax1.text(_i + _w / 2, _f + 0.1, f"{_f:.1f}", ha="center", fontsize=8)
+
+        # CER
+        _ax2.bar(_x - _w / 2, _raw_cer, _w, label="Raw", color="#4C72B0")
+        _ax2.bar(_x + _w / 2, _fuzzy_cer, _w, label="Fuzzy", color="#DD8452")
+        _ax2.set_ylabel("%")
+        _ax2.set_title("CER (menor = melhor)")
+        _ax2.set_xticks(_x)
+        _ax2.set_xticklabels(_nomes, rotation=20, ha="right")
+        _ax2.legend()
+        for _i, (_r, _f) in enumerate(zip(_raw_cer, _fuzzy_cer)):
+            _ax2.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
+            _ax2.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+
+        plt.tight_layout()
+        mo.mpl.interactive(_fig)
     return
 
 
