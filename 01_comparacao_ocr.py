@@ -123,9 +123,13 @@ def _(mo):
 def _():
     import os
     import time
+    import urllib.request
+    import zipfile
     import cv2
     import jiwer
     import Levenshtein
+    import matplotlib.pyplot as plt
+    import numpy as np
     import pandas as pd
     import pytesseract
     import torch
@@ -153,12 +157,16 @@ def _():
         VisionEncoderDecoderModel,
         cv2,
         jiwer,
+        np,
         os,
         partial,
         pd,
+        plt,
         pytesseract,
         time,
         torch,
+        urllib,
+        zipfile,
     )
 
 
@@ -182,9 +190,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, os):
-    import urllib.request
-    import zipfile
+def _(mo, os, urllib, zipfile):
 
     # Substitua pelo link do seu zip (Google Drive ou URL direta)
     DATASET_URL = "https://drive.google.com/file/d/1l6f9mAehHoBySLmWuIsn4Af833EAX54o/view?usp=sharing"
