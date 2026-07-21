@@ -36,7 +36,7 @@ def _():
 def _(mo):
     mo.md(r"""
     # 1 Introdução
-    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte de um projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de quatro alternativas de OCR: Tesseract, PaddleOCR, TrOCR e Qwen3-VL.
+    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte do projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de quatro alternativas de OCR: Tesseract, PaddleOCR, TrOCR e Qwen3-VL.
     """)
     return
 
@@ -201,6 +201,7 @@ def _(mo, os, urllib, zipfile):
             if "drive.google.com" in DATASET_URL:
                 try:
                     import gdown
+
                     gdown.download(DATASET_URL, zip_path, quiet=False)
                 except ImportError:
                     raise ImportError(
@@ -228,11 +229,13 @@ def _(DATASET_DIR, mo, os, pd):
 
     # ── Carregar CSVs ──
     df_train = pd.read_csv(CAMINHO_CSV_TREINO)
-    df_test  = pd.read_csv(CAMINHO_CSV_TESTE)
+    df_test = pd.read_csv(CAMINHO_CSV_TESTE)
 
     # ── Amostra fixa (500 imagens, random_state=42 para reprodutibilidade) ──
     TAMANHO_AMOSTRA = 500
-    df_amostra = df_test.sample(n=TAMANHO_AMOSTRA, random_state=42).reset_index(drop=True)
+    df_amostra = df_test.sample(n=TAMANHO_AMOSTRA, random_state=42).reset_index(
+        drop=True
+    )
 
     # ── Vocabulário global (treino + teste, para pós-processamento fuzzy) ──
     VOCABULARIO = (
@@ -270,9 +273,7 @@ def _(DIRETORIO_TESTE, df_amostra, mo, os):
             row = amostra_exemplos.iloc[j]
             caminho_img = os.path.join(DIRETORIO_TESTE, str(row["Images"]))
             if os.path.exists(caminho_img):
-                cells.append(
-                    mo.image(caminho_img, width=120, caption=str(row["Text"]))
-                )
+                cells.append(mo.image(caminho_img, width=120, caption=str(row["Text"])))
         if cells:
             _imagens_exemplos.append(mo.hstack(cells, gap=0.5))
     mo.vstack(_imagens_exemplos)
@@ -309,7 +310,6 @@ def _(Levenshtein, jiwer):
         """Normaliza texto: strip + lowercase."""
         return str(texto).strip().lower()
 
-
     def calcular_metricas(gabarito: str, predicao: str):
         """
         Calcula todas as métricas entre gabarito e predição.
@@ -339,7 +339,9 @@ def _(Levenshtein, jiwer):
 
 @app.cell(hide_code=True)
 def _(Levenshtein, normalizar):
-    def corrigir_fuzzy(texto_ocr: str, vocabulario: list[str], score_minimo: float = 0.0) -> str:
+    def corrigir_fuzzy(
+        texto_ocr: str, vocabulario: list[str], score_minimo: float = 0.0
+    ) -> str:
         """
         Corrige texto via fuzzy matching contra um vocabulário conhecido.
 
@@ -525,7 +527,9 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
         try:
             start = time.time()
             image = Image.open(caminho_imagem).convert("RGB")
-            pixel_values = image_processor(images=image, return_tensors="pt").pixel_values
+            pixel_values = image_processor(
+                images=image, return_tensors="pt"
+            ).pixel_values
             pixel_values = pixel_values.to(model.device)
             generated_ids = model.generate(pixel_values, max_new_tokens=64)
             text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
@@ -533,7 +537,6 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
         except Exception as e:
             print(f" TrOCR [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0
-
 
     def predizer_paddle(caminho_imagem, ocr):
         """PaddleOCR — PP-OCRv6 com detector + recognizer integrados."""
@@ -563,7 +566,6 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
             print(f" PaddleOCR [{os.path.basename(caminho_imagem)}]: {e}")
             return "", time.time() - start
 
-
     def predizer_tesseract(caminho_imagem):
         """Tesseract — engine clássica de OCR."""
         start = time.time()
@@ -574,7 +576,6 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
         except Exception as e:
             print(f" Tesseract [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0
-
 
     def predizer_qwen(caminho_imagem, processor, model):
         """Qwen3-VL — modelo multimodal para OCR via instrução."""
@@ -664,25 +665,27 @@ def _(calcular_metricas, corrigir_fuzzy, normalizar, os, pd):
                 gabarito, pred_fuzzy
             )
 
-            resultados.append({
-                "Arquivo": os.path.basename(caminho),
-                "Gabarito": gabarito,
-                "Predicao_Raw": pred_raw,
-                "Predicao_Fuzzy": pred_fuzzy,
-                "Levenshtein_Raw": lev_d,
-                "Levenshtein_Fuzzy": lev_df,
-                "Similaridade_Raw": lev_r,
-                "Similaridade_Fuzzy": lev_rf,
-                "CER_Raw": cer,
-                "CER_Fuzzy": cer_f,
-                "WER_Raw": wer,
-                "WER_Fuzzy": wer_f,
-                "Accuracy_Raw": acc,
-                "Accuracy80_Raw": acc80,
-                "Accuracy_Fuzzy": acc_f,
-                "Accuracy80_Fuzzy": acc80_f,
-                "Tempo_Inferencia": tempo,
-            })
+            resultados.append(
+                {
+                    "Arquivo": os.path.basename(caminho),
+                    "Gabarito": gabarito,
+                    "Predicao_Raw": pred_raw,
+                    "Predicao_Fuzzy": pred_fuzzy,
+                    "Levenshtein_Raw": lev_d,
+                    "Levenshtein_Fuzzy": lev_df,
+                    "Similaridade_Raw": lev_r,
+                    "Similaridade_Fuzzy": lev_rf,
+                    "CER_Raw": cer,
+                    "CER_Fuzzy": cer_f,
+                    "WER_Raw": wer,
+                    "WER_Fuzzy": wer_f,
+                    "Accuracy_Raw": acc,
+                    "Accuracy80_Raw": acc80,
+                    "Accuracy_Fuzzy": acc_f,
+                    "Accuracy80_Fuzzy": acc80_f,
+                    "Tempo_Inferencia": tempo,
+                }
+            )
 
             if (idx + 1) % 50 == 0:
                 print(f"  [{nome}] {idx + 1}/{total} imagens...")
@@ -889,7 +892,9 @@ def _(CSVS_RESULTADO, mo, os, pd):
             dfs_disponiveis[_nome] = _df
 
     if not dfs_disponiveis:
-        mo.md("⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.5 primeiro.")
+        mo.md(
+            "⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.5 primeiro."
+        )
     else:
         mo.md(f"CSVs encontrados: **{', '.join(dfs_disponiveis.keys())}**")
 
@@ -925,16 +930,18 @@ def _(dfs_disponiveis, mo, pd):
         _linhas = []
         for _nome, _df in dfs_disponiveis.items():
             for variante in ("Raw", "Fuzzy"):
-                _linhas.append({
-                    "Motor": _nome,
-                    "Variante": variante,
-                    "Word Acc (%)": fmt_pct(_df[f"Accuracy_{variante}"].mean()),
-                    "Acc @80% (%)": fmt_pct(_df[f"Accuracy80_{variante}"].mean()),
-                    "Lev Médio": fmt_abs(_df[f"Levenshtein_{variante}"].mean()),
-                    "CER (%)": fmt_pct(_df[f"CER_{variante}"].mean()),
-                    "WER (%)": fmt_pct(_df[f"WER_{variante}"].mean()),
-                    "Tempo Médio (s)": fmt_abs(_df["Tempo_Inferencia"].mean()),
-                })
+                _linhas.append(
+                    {
+                        "Motor": _nome,
+                        "Variante": variante,
+                        "Word Acc (%)": fmt_pct(_df[f"Accuracy_{variante}"].mean()),
+                        "Acc @80% (%)": fmt_pct(_df[f"Accuracy80_{variante}"].mean()),
+                        "Lev Médio": fmt_abs(_df[f"Levenshtein_{variante}"].mean()),
+                        "CER (%)": fmt_pct(_df[f"CER_{variante}"].mean()),
+                        "WER (%)": fmt_pct(_df[f"WER_{variante}"].mean()),
+                        "Tempo Médio (s)": fmt_abs(_df["Tempo_Inferencia"].mean()),
+                    }
+                )
 
         df_painel = pd.DataFrame(_linhas)
         resultado = mo.ui.table(data=df_painel, pagination=True)
@@ -979,7 +986,6 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
             _fuzzy_acc.append(_df["Accuracy_Fuzzy"].mean() * 100)
             _raw_acc80.append(_df["Accuracy80_Raw"].mean() * 100)
             _fuzzy_acc80.append(_df["Accuracy80_Fuzzy"].mean() * 100)
-
 
     _x = np.arange(len(_nomes))
     _w = 0.35
@@ -1075,6 +1081,500 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
 
         plt.tight_layout()
         _resultado = mo.mpl.interactive(_fig)
+
+    _resultado
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.3 Tempo de Inferência
+
+    Comparação do tempo médio de inferência por modelo. Barras Raw vs Fuzzy
+    são idênticas aqui (o tempo é o mesmo), então usamos apenas uma barra
+    por modelo com anotação do valor.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(CSVS_RESULTADO, mo, os, pd, plt):
+    _nomes = []
+    _tempos = []
+
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            _nomes.append(_nome)
+            _tempos.append(_df["Tempo_Inferencia"].mean())
+
+    if _nomes:
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
+
+        _fig, _ax = plt.subplots(figsize=(10, 5))
+        _bars = _ax.bar(
+            _nomes, _tempos, color=_colors, edgecolor="white", linewidth=0.8
+        )
+
+        for _bar, _t in zip(_bars, _tempos):
+            _ax.text(
+                _bar.get_x() + _bar.get_width() / 2,
+                _bar.get_height() + max(_tempos) * 0.02,
+                f"{_t:.2f}s",
+                ha="center",
+                fontsize=10,
+                fontweight="bold",
+            )
+
+        _ax.set_ylabel("Tempo médio (s)")
+        _ax.set_title("Tempo de Inferência por Modelo (menor = melhor)")
+        _ax.grid(axis="y", alpha=0.3, linestyle="--")
+
+        plt.tight_layout()
+        _resultado = mo.mpl.interactive(_fig)
+    _resultado
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.4 Boxplot da Similaridade (Levenshtein Ratio)
+
+    Distribuição da similaridade entre predição e gabarito para cada modelo.
+    Mostra mediana, quartis e outliers — vai além da média para revelar
+    a consistência de cada OCR.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(CSVS_RESULTADO, mo, os, pd, plt):
+    _nomes_raw = []
+    _dados_raw = []
+    _dados_fuzzy = []
+
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            _nomes_raw.append(_nome)
+            _dados_raw.append(_df["Similaridade_Raw"].dropna().values)
+            _dados_fuzzy.append(_df["Similaridade_Fuzzy"].dropna().values)
+
+    if _nomes_raw:
+        _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+        # Raw
+        _bp1 = _ax1.boxplot(
+            _dados_raw,
+            labels=_nomes_raw,
+            patch_artist=True,
+        )
+        for _patch, _color in zip(
+            _bp1["boxes"],
+            ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes_raw)],
+        ):
+            _patch.set_facecolor(_color)
+            _patch.set_alpha(0.7)
+        _ax1.set_ylabel("Similaridade (Levenshtein Ratio)")
+        _ax1.set_title("Similaridade — Raw")
+        _ax1.set_ylim(0, 1.05)
+        _ax1.grid(axis="y", alpha=0.3, linestyle="--")
+
+        # Fuzzy
+        _bp2 = _ax2.boxplot(
+            _dados_fuzzy,
+            labels=_nomes_raw,
+            patch_artist=True,
+        )
+        for _patch, _color in zip(
+            _bp2["boxes"],
+            ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes_raw)],
+        ):
+            _patch.set_facecolor(_color)
+            _patch.set_alpha(0.7)
+        _ax2.set_ylabel("Similaridade (Levenshtein Ratio)")
+        _ax2.set_title("Similaridade — Fuzzy")
+        _ax2.set_ylim(0, 1.05)
+        _ax2.grid(axis="y", alpha=0.3, linestyle="--")
+
+        plt.tight_layout()
+        _resultado = mo.mpl.interactive(_fig)
+    _resultado
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.5 Scatter: Word Accuracy vs Tempo de Inferência
+
+    Visualização de trade-off: cada ponto é um modelo. O eixo X é o tempo
+    de inferência (log-scale), o eixo Y é a Word Accuracy. O quadrante
+    ideal é o canto **superior esquerdo** (rápido + preciso).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(CSVS_RESULTADO, mo, os, pd, plt):
+    _nomes = []
+    _acc_raw = []
+    _acc_fuzzy = []
+    _tempos = []
+
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            _nomes.append(_nome)
+            _acc_raw.append(_df["Accuracy_Raw"].mean() * 100)
+            _acc_fuzzy.append(_df["Accuracy_Fuzzy"].mean() * 100)
+            _tempos.append(_df["Tempo_Inferencia"].mean())
+
+    if _nomes:
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
+
+        _fig, _ax = plt.subplots(figsize=(10, 6))
+
+        # Raw (círculo)
+        for _i, _nome in enumerate(_nomes):
+            _ax.scatter(
+                _tempos[_i],
+                _acc_raw[_i],
+                s=180,
+                color=_colors[_i],
+                edgecolors="black",
+                linewidth=0.8,
+                zorder=5,
+                marker="o",
+                label=f"{_nome} (Raw)",
+            )
+            _ax.annotate(
+                f"{_nome}\nRaw",
+                (_tempos[_i], _acc_raw[_i]),
+                textcoords="offset points",
+                xytext=(10, 8),
+                fontsize=8,
+                fontweight="bold",
+                color=_colors[_i],
+            )
+
+        # Fuzzy (triângulo)
+        for _i, _nome in enumerate(_nomes):
+            _ax.scatter(
+                _tempos[_i],
+                _acc_fuzzy[_i],
+                s=140,
+                color=_colors[_i],
+                edgecolors="black",
+                linewidth=0.8,
+                zorder=5,
+                marker="D",
+                label=f"{_nome} (Fuzzy)",
+            )
+            _ax.annotate(
+                f"Fuzzy",
+                (_tempos[_i], _acc_fuzzy[_i]),
+                textcoords="offset points",
+                xytext=(10, -12),
+                fontsize=7,
+                fontstyle="italic",
+                color=_colors[_i],
+            )
+
+        _ax.set_xscale("log")
+        _ax.set_xlabel("Tempo de Inferência (s, log scale)")
+        _ax.set_ylabel("Word Accuracy (%)")
+        _ax.set_title("Trade-off: Velocidade × Acurácia")
+        _ax.grid(alpha=0.3, linestyle="--")
+        _ax.legend(loc="lower right", fontsize=7)
+
+        # Sombra do quadrante ideal
+        _ax.axhspan(0, 100, xmin=0, xmax=0.35, alpha=0.05, color="green")
+
+        plt.tight_layout()
+        _resultado = mo.mpl.interactive(_fig)
+    _resultado
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.6 WER (Word Error Rate)
+
+    Taxa de erro a nível de palavra. Complementa o CER plotado em 11.2.
+    Quanto menor, melhor.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(CSVS_RESULTADO, mo, np, os, pd, plt):
+    _nomes = []
+    _raw_wer = []
+    _fuzzy_wer = []
+
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            _nomes.append(_nome)
+            _raw_wer.append(_df["WER_Raw"].mean() * 100)
+            _fuzzy_wer.append(_df["WER_Fuzzy"].mean() * 100)
+
+    if _nomes:
+        _x = np.arange(len(_nomes))
+        _w = 0.35
+
+        _fig, _ax = plt.subplots(figsize=(10, 5))
+
+        _ax.bar(_x - _w / 2, _raw_wer, _w, label="Raw", color="#4C72B0")
+        _ax.bar(_x + _w / 2, _fuzzy_wer, _w, label="Fuzzy", color="#DD8452")
+        _ax.set_ylabel("%")
+        _ax.set_title("WER — Word Error Rate (menor = melhor)")
+        _ax.set_xticks(_x)
+        _ax.set_xticklabels(_nomes, rotation=0, ha="center")
+        _ax.legend()
+        _ax.grid(axis="y", alpha=0.3, linestyle="--")
+
+        for _i, (_r, _f) in enumerate(zip(_raw_wer, _fuzzy_wer)):
+            _ax.text(
+                _i - _w / 2,
+                _r + max(_raw_wer) * 0.02,
+                f"{_r:.1f}",
+                ha="center",
+                fontsize=8,
+            )
+            _ax.text(
+                _i + _w / 2,
+                _f + max(_fuzzy_wer) * 0.02,
+                f"{_f:.1f}",
+                ha="center",
+                fontsize=8,
+            )
+
+        plt.tight_layout()
+        _resultado = mo.mpl.interactive(_fig)
+    _resultado
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.7 Heatmap de Métricas
+
+    Visão panorâmica de todos os modelos × todas as métricas (variante Raw).
+    Cores mais intensas = melhor desempenho. Passe o mouse sobre as células
+    para ver os valores exatos. Permite identificar rapidamente o melhor
+    modelo em cada métrica.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(CSVS_RESULTADO, mo, np, os, pd):
+    import plotly.graph_objects as go
+
+    _nomes = []
+    _metricas_data = []
+
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            _nomes.append(_nome)
+            _metricas_data.append(
+                {
+                    "Word Acc (%)": _df["Accuracy_Raw"].mean() * 100,
+                    "Acc @80% (%)": _df["Accuracy80_Raw"].mean() * 100,
+                    "Similaridade": _df["Similaridade_Raw"].mean() * 100,
+                    "CER (%)": _df["CER_Raw"].mean() * 100,
+                    "WER (%)": _df["WER_Raw"].mean() * 100,
+                    "Lev. Médio": _df["Levenshtein_Raw"].mean(),
+                    "Tempo (s)": _df["Tempo_Inferencia"].mean(),
+                }
+            )
+
+    if _nomes:
+        _metricas_nomes = [
+            "Word Acc (%)",
+            "Acc @80% (%)",
+            "Similaridade",
+            "CER (%)",
+            "WER (%)",
+            "Lev. Médio",
+            "Tempo (s)",
+        ]
+        _n_metrica = len(_metricas_nomes)
+        _n_modelo = len(_nomes)
+
+        # Construir matriz de valores reais
+        _matriz = np.zeros((_n_modelo, _n_metrica))
+        for _i, _md in enumerate(_metricas_data):
+            for _j, _mn in enumerate(_metricas_nomes):
+                _matriz[_i, _j] = _md[_mn]
+
+        # Normalizar cada métrica para 0-1 (1 = melhor)
+        _matriz_norm = np.zeros_like(_matriz)
+        _alta_melhor = [True, True, True, False, False, False, False]
+
+        for _j in range(_n_metrica):
+            _col = _matriz[:, _j]
+            _min, _max = _col.min(), _col.max()
+            if _max - _min < 1e-9:
+                _matriz_norm[:, _j] = 0.5
+            elif _alta_melhor[_j]:
+                _matriz_norm[:, _j] = (_col - _min) / (_max - _min)
+            else:
+                _matriz_norm[:, _j] = (_max - _col) / (_max - _min)
+
+        # Texto formatado para hover e anotações
+        _texto_celulas = []
+        for _i in range(_n_modelo):
+            _linha = []
+            for _j in range(_n_metrica):
+                _val = _matriz[_i, _j]
+                _fmt = f"{_val:.1f}" if _val < 10 else f"{_val:.0f}"
+                _linha.append(_fmt)
+            _texto_celulas.append(_linha)
+
+        # Cores: RdYlGn invertido para preferências das métricas normalizadas
+        _fig = go.Figure(
+            data=go.Heatmap(
+                z=_matriz_norm,
+                x=_metricas_nomes,
+                y=_nomes,
+                text=_texto_celulas,
+                texttemplate="%{text}",
+                textfont=dict(size=13, family="sans-serif"),
+                colorscale=[
+                    [0.0, "#d73027"],  # vermelho = pior
+                    [0.25, "#fc8d59"],
+                    [0.5, "#fee08b"],  # amarelo = mediano
+                    [0.75, "#91cf60"],
+                    [1.0, "#1a9850"],  # verde = melhor
+                ],
+                zmin=0,
+                zmax=1,
+                showscale=True,
+                colorbar=dict(
+                    title=dict(text="Score<br>normalizado", side="right"),
+                    tickvals=[0, 0.25, 0.5, 0.75, 1.0],
+                    ticktext=["Pior", "", "Médio", "", "Melhor"],
+                    len=0.6,
+                    thickness=15,
+                ),
+                hovertemplate=(
+                    "<b>Modelo:</b> %{y}<br>"
+                    "<b>Métrica:</b> %{x}<br>"
+                    "<b>Valor:</b> %{text}<br>"
+                    "<b>Score:</b> %{z:.2f}<extra></extra>"
+                ),
+                xgap=3,
+                ygap=3,
+            )
+        )
+
+        _fig.update_layout(
+            title=dict(
+                text="Heatmap de Métricas — Raw (verde = melhor, vermelho = pior)",
+                font=dict(size=15),
+                x=0.5,
+            ),
+            xaxis=dict(
+                title="Métrica",
+                side="bottom",
+                tickangle=0,
+                tickfont=dict(size=11),
+            ),
+            yaxis=dict(
+                title="Modelo",
+                tickfont=dict(size=13, family="sans-serif"),
+            ),
+            width=850,
+            height=320,
+            margin=dict(l=20, r=20, t=50, b=80),
+            plot_bgcolor="white",
+        )
+
+        _resultado = mo.ui.plotly(_fig)
+    _resultado
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.8 Acurácia por Comprimento da Palavra
+
+    O desempenho varia com o tamanho da palavra? Agrupa as palavras do
+    gabarito por faixa de comprimento e plota a Word Accuracy em cada faixa.
+    Revela se algum modelo sofre mais com palavras longas ou curtas.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(CSVS_RESULTADO, mo, np, os, pd, plt):
+    _nomes = []
+    _dataframes = []
+
+    for _nome, _csv in CSVS_RESULTADO:
+        if os.path.exists(_csv):
+            _df = pd.read_csv(_csv)
+            _nomes.append(_nome)
+            _dataframes.append(_df)
+
+    if _nomes:
+        # Faixas de comprimento (número de caracteres)
+        _faixas = [(1, 3), (4, 6), (7, 9), (10, 12), (13, 20)]
+        _rotulos = [f"{a}-{b}" for a, b in _faixas]
+
+        _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(15, 5))
+
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
+        _x = np.arange(len(_rotulos))
+        _w = 0.8 / len(_nomes)
+
+        for _variante, _ax, _titulo in [
+            ("Raw", _ax1, "Word Accuracy por Comprimento — Raw"),
+            ("Fuzzy", _ax2, "Word Accuracy por Comprimento — Fuzzy"),
+        ]:
+            for _idx, (_nome, _df) in enumerate(zip(_nomes, _dataframes)):
+                _accs = []
+                for _lo, _hi in _faixas:
+                    _mask = _df["Gabarito"].astype(str).str.len().between(_lo, _hi)
+                    if _mask.sum() > 0:
+                        _accs.append(
+                            _df.loc[_mask, f"Accuracy_{_variante}"].mean() * 100
+                        )
+                    else:
+                        _accs.append(0)
+
+                _offset = (_idx - len(_nomes) / 2 + 0.5) * _w
+                _ax.bar(
+                    _x + _offset,
+                    _accs,
+                    _w,
+                    label=_nome,
+                    color=_colors[_idx],
+                    edgecolor="white",
+                    linewidth=0.5,
+                )
+
+            _ax.set_xlabel("Comprimento da palavra (caracteres)")
+            _ax.set_ylabel("Word Accuracy (%)")
+            _ax.set_title(_titulo)
+            _ax.set_xticks(_x)
+            _ax.set_xticklabels(_rotulos)
+            _ax.legend(fontsize=7)
+            _ax.grid(axis="y", alpha=0.3, linestyle="--")
+            _ax.set_ylim(0, 105)
+
+        plt.tight_layout()
+        _resultado = mo.mpl.interactive(_fig)
+    _resultado
     return
 
 
