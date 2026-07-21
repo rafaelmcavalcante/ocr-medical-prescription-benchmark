@@ -2,6 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "accelerate>=1.14.0",
+#     "gdown>=5.2.0",
 #     "jiwer>=4.0.0",
 #     "marimo>=0.23.14",
 #     "matplotlib>=3.10.9",
@@ -10,7 +11,7 @@
 #     "paddleocr>=3.7.0",
 #     "pandas>=2.3.3",
 #     "pillow>=12.3.0",
-#     "pytesseract>=0.3.13",
+#     "pytesseract>=0.13.3",
 #     "python-levenshtein>=0.27.3",
 #     "torch>=2.13.0",
 #     "torchvision>=0.28.0",
@@ -210,8 +211,10 @@ def _(mo, os, urllib, zipfile):
                     )
             else:
                 urllib.request.urlretrieve(DATASET_URL, zip_path)
+
+        # Extrai diretamente para a pasta RxHandBD/
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(".")
+            zf.extractall("RxHandBD")
         mo.md("Dataset extraído!")
     else:
         mo.md("Dataset já existe localmente.")
