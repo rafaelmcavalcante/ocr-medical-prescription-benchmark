@@ -185,15 +185,12 @@ def _(mo):
     ## 6.1 Download (se necessário)
 
     Se a pasta `RxHandBD/` não existir, o dataset será baixado automaticamente.
-    Preencha o link abaixo com o seu arquivo `.zip` (Google Drive, Zenodo, etc.).
     """)
     return
 
 
 @app.cell(hide_code=True)
 def _(mo, os, urllib, zipfile):
-
-    # Substitua pelo link do seu zip (Google Drive ou URL direta)
     DATASET_URL = "https://drive.google.com/file/d/1l6f9mAehHoBySLmWuIsn4Af833EAX54o/view?usp=sharing"
     DATASET_DIR = "RxHandBD"
 
@@ -264,11 +261,12 @@ def _(DATASET_DIR, mo, os, pd):
 def _(DIRETORIO_TESTE, df_amostra, mo, os):
     mo.md("### Exemplos do dataset")
 
-    linhas = []
-    amostra_exemplos = df_amostra.head(8)
-    for i in range(0, 8, 4):
+    _imagens_exemplos = []
+    qtd_amostras = 16
+    amostra_exemplos = df_amostra.head(qtd_amostras)
+    for i in range(0, qtd_amostras, 4):
         cells = []
-        for j in range(i, min(i + 4, 8)):
+        for j in range(i, min(i + 4, qtd_amostras)):
             row = amostra_exemplos.iloc[j]
             caminho_img = os.path.join(DIRETORIO_TESTE, str(row["Images"]))
             if os.path.exists(caminho_img):
@@ -276,8 +274,8 @@ def _(DIRETORIO_TESTE, df_amostra, mo, os):
                     mo.image(caminho_img, width=120, caption=str(row["Text"]))
                 )
         if cells:
-            linhas.append(mo.hstack(cells, gap=0.5))
-    mo.vstack(linhas)
+            _imagens_exemplos.append(mo.hstack(cells, gap=0.5))
+    mo.vstack(_imagens_exemplos)
     return
 
 
@@ -297,7 +295,6 @@ def _(mo):
     | Métrica | Descrição |
     |---|---|
     | **Levenshtein (distância)** | Nº mínimo de inserções, remoções ou substituições de caracteres para transformar a predição no gabarito. Quanto menor, melhor. |
-    | **Levenshtein (similaridade)** | Versão normalizada (0 a 1) da distância. 1 = idêntico, 0 = totalmente diferente. |
     | **CER** (*Character Error Rate*) | Taxa de erro a nível de caractere: `(inserçōes + deleções + substituições) / total de caracteres`. |
     | **WER** (*Word Error Rate*) | Taxa de erro a nível de palavra. Mesma lógica do CER, mas operando sobre palavras. |
     | **Word Accuracy** | Acurácia exata: 1 se o texto predito for **idêntico** ao gabarito, 0 caso contrário. |
@@ -923,12 +920,12 @@ def _(dfs_disponiveis, mo, pd):
         return round(v, 2)
 
     if not dfs_disponiveis:
-        mo.md(" Nenhum dado para comparar.")
+        _resultado = mo.md("⚠️ Nenhum dado para comparar.")
     else:
-        linhas = []
+        _linhas = []
         for _nome, _df in dfs_disponiveis.items():
             for variante in ("Raw", "Fuzzy"):
-                linhas.append({
+                _linhas.append({
                     "Motor": _nome,
                     "Variante": variante,
                     "Word Acc (%)": fmt_pct(_df[f"Accuracy_{variante}"].mean()),
@@ -939,8 +936,10 @@ def _(dfs_disponiveis, mo, pd):
                     "Tempo Médio (s)": fmt_abs(_df["Tempo_Inferencia"].mean()),
                 })
 
-        df_painel = pd.DataFrame(linhas)
-        mo.ui.table(df_painel)
+        df_painel = pd.DataFrame(_linhas)
+        resultado = mo.ui.table(data=df_painel, pagination=True)
+        print("to aqui")
+    resultado
     return
 
 
@@ -965,7 +964,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(CSVS_RESULTADO, mo, np, os, pd, plt):
-
     # Carregar CSVs disponíveis
     _nomes = []
     _raw_acc = []
@@ -982,42 +980,41 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
             _raw_acc80.append(_df["Accuracy80_Raw"].mean() * 100)
             _fuzzy_acc80.append(_df["Accuracy80_Fuzzy"].mean() * 100)
 
-    if not _nomes:
-        mo.md(" Nenhum CSV de resultado encontrado. Rode as células 9.3–9.6 primeiro.")
-    else:
-        _x = np.arange(len(_nomes))
-        _w = 0.35
 
-        _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    _x = np.arange(len(_nomes))
+    _w = 0.35
 
-        # Word Accuracy
-        _ax1.bar(_x - _w / 2, _raw_acc, _w, label="Raw", color="#4C72B0")
-        _ax1.bar(_x + _w / 2, _fuzzy_acc, _w, label="Fuzzy", color="#DD8452")
-        _ax1.set_ylabel("%")
-        _ax1.set_title("Word Accuracy")
-        _ax1.set_xticks(_x)
-        _ax1.set_xticklabels(_nomes, rotation=20, ha="right")
-        _ax1.legend()
-        _ax1.set_ylim(0, 105)
-        for _i, (_r, _f) in enumerate(zip(_raw_acc, _fuzzy_acc)):
-            _ax1.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
-            _ax1.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+    _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(13, 5))
 
-        # Acc @80%
-        _ax2.bar(_x - _w / 2, _raw_acc80, _w, label="Raw", color="#4C72B0")
-        _ax2.bar(_x + _w / 2, _fuzzy_acc80, _w, label="Fuzzy", color="#DD8452")
-        _ax2.set_ylabel("%")
-        _ax2.set_title("Word Accuracy @80%")
-        _ax2.set_xticks(_x)
-        _ax2.set_xticklabels(_nomes, rotation=20, ha="right")
-        _ax2.legend()
-        _ax2.set_ylim(0, 105)
-        for _i, (_r, _f) in enumerate(zip(_raw_acc80, _fuzzy_acc80)):
-            _ax2.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
-            _ax2.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+    # Word Accuracy
+    _ax1.bar(_x - _w / 2, _raw_acc, _w, label="Raw", color="#4C72B0")
+    _ax1.bar(_x + _w / 2, _fuzzy_acc, _w, label="Fuzzy", color="#DD8452")
+    _ax1.set_ylabel("%")
+    _ax1.set_title("Word Accuracy")
+    _ax1.set_xticks(_x)
+    _ax1.set_xticklabels(_nomes, rotation=0, ha="right")
+    _ax1.legend()
+    _ax1.set_ylim(0, 105)
+    for _i, (_r, _f) in enumerate(zip(_raw_acc, _fuzzy_acc)):
+        _ax1.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
+        _ax1.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
 
-        plt.tight_layout()
-        mo.mpl.interactive(_fig)
+    # Acc @80%
+    _ax2.bar(_x - _w / 2, _raw_acc80, _w, label="Raw", color="#4C72B0")
+    _ax2.bar(_x + _w / 2, _fuzzy_acc80, _w, label="Fuzzy", color="#DD8452")
+    _ax2.set_ylabel("%")
+    _ax2.set_title("Word Accuracy @80%")
+    _ax2.set_xticks(_x)
+    _ax2.set_xticklabels(_nomes, rotation=20, ha="right")
+    _ax2.legend()
+    _ax2.set_ylim(0, 105)
+    for _i, (_r, _f) in enumerate(zip(_raw_acc80, _fuzzy_acc80)):
+        _ax2.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
+        _ax2.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+
+    plt.tight_layout()
+    _resultado = mo.mpl.interactive(_fig)
+    _resultado
     return
 
 
@@ -1031,7 +1028,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(CSVS_RESULTADO, mo, np, os, pd, plt):
-
     _nomes = []
     _raw_lev = []
     _fuzzy_lev = []
@@ -1078,7 +1074,7 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
             _ax2.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
 
         plt.tight_layout()
-        mo.mpl.interactive(_fig)
+        _resultado = mo.mpl.interactive(_fig)
     return
 
 
