@@ -3,7 +3,7 @@ name = "ocr"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "accelerate>=1.14.0",
     "jiwer>=4.0.0",
@@ -24,3 +24,6 @@ dependencies = [
     "visidata>=3.4",
     "watchdog>=6.0.0",
 ]
+
+[tool.marimo.runtime]
+watcher_on_save = "autorun"

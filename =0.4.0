@@ -1,6 +1,0 @@
-  × No solution found when resolving dependencies:
-  ╰─▶ Because the current Python version (3.10.12) does not satisfy
-      Python>=3.11 and all versions of olmocr depend on Python>=3.11, we can
-      conclude that all versions of olmocr cannot be used.
-      And because you require olmocr, we can conclude that your requirements
-      are unsatisfiable.
