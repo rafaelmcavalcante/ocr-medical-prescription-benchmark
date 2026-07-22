@@ -53,25 +53,6 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ## 2.1 Tesseract
-
-    O Tesseract é um programa de reconhecimento de texto (OCR) de código aberto, mantido pelo Google. Ele existe há mais de 35 anos — foi criado pela HP nos anos 1980 — e continua sendo um dos OCRs mais usados no mundo.
-
-    ### Como funciona
-
-    O Tesseract analisa a imagem em etapas: primeiro ele encontra as regiões onde há texto, depois identifica linhas e palavras e, por fim, compara cada caractere com padrões que ele já conhece. Ele não usa redes neurais modernas para o reconhecimento — seu ponto forte está em textos impressos e bem digitalizados.
-
-    ### Pontos fortes
-
-    - **Leve e rápido**: não precisa de GPU, roda até em computadores mais antigos
-    - **Gratuito e estável**: não depende de nenhum serviço online ou pagamento
-    - **Boa cobertura de idiomas**: suporta mais de 100 línguas
-
-    ### Limitações
-
-    - **Fraca com manuscrito**: como ele se baseia em formatos de letra bem definidos, tem muita dificuldade com caligrafia humana — exatamente o tipo de texto que aparece em receitas médicas
-    - **Sensível a ruído**: iluminação irregular, fundo sujo ou borrões atrapalham bastante a leitura
-
-    No nosso experimento, o Tesseract serve como baseline: um ponto de partida simples e acessível para comparar com alternativas mais modernas.
     """)
     return
 
@@ -79,27 +60,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2.2 PaddleOCR (PP-OCRv6)
-
-    O **PaddleOCR** é uma plataforma de OCR desenvolvida pela Baidu, uma das maiores empresas de tecnologia da China. A versão que usamos aqui é a **PP-OCRv6**, a sexta geração do sistema, lançada em 2025.
-
-    ### Como funciona
-
-    Diferente do Tesseract, o PaddleOCR usa redes neurais profundas em todo o processo. Ele trabalha em dois estágios: primeiro um detector encontra todas as áreas de texto na imagem; depois um reconhecedor lê o conteúdo de cada área. A versão v6 trouxe melhorias significativas na qualidade do reconhecimento, especialmente para textos em condições difíceis.
-
-    ### Pontos fortes
-
-    - **Bom equilíbrio entre velocidade e precisão**: é rápido o suficiente para uso prático, mas muito mais preciso que motores clássicos
-    - **Detecção robusta**: encontra texto mesmo em imagens tortas, com sombras ou iluminação irregular
-    - **Pré-treinamento multilíngue**: reconhece bem dezenas de idiomas, incluindo alfabetos não latinos
-    - **Código aberto**: pode ser usado e modificado livremente
-
-    ### Limitações
-
-    - **Precisa de GPU para desempenho aceitável**: na CPU a inferência fica bem lenta
-    - **Não foi pensado especificamente para manuscrito**: apesar de usar redes neurais, o PP-OCRv6 foi treinado majoritariamente com texto impresso. Em caligrafia médica, seu desempenho tende a cair
-
-    No nosso experimento, o PaddleOCR representa a categoria de OCRs modernos baseados em detecção + reconhecimento.
+    ## 2.2  PaddleOCR
     """)
     return
 
@@ -108,30 +69,6 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ## 2.3 TrOCR
-
-    O **TrOCR** (*Transformer-based OCR*) é um modelo criado pela Microsoft Research, apresentado em 2021. Ele possui uma versão específica para texto manuscrito, o que o torna especialmente relevante para o nosso problema de receitas médicas.
-
-    ### Como funciona
-
-    O TrOCR adota uma arquitetura do tipo *transformer*, a mesma família de modelos por trás de ferramentas como o ChatGPT. Ele tem duas partes principais: um codificador visual (baseado em ViT — *Vision Transformer*) que "enxerga" a imagem e transforma cada pedaço dela em números, e um decodificador de texto (baseado em GPT-2) que gera o texto letra por letra.
-
-    Diferente de sistemas como PaddleOCR e Tesseract, o TrOCR não tem um detector separado: ele recebe uma imagem já recortada com uma palavra e a lê diretamente, de ponta a ponta. Isso simplifica o processo e reduz fontes de erro.
-
-    Usamos aqui a versão `trocr-large-handwritten`, a maior e mais capaz da família, com cerca de 340 milhões de parâmetros.
-
-    ### Pontos fortes
-
-    - **Treinado especificamente para manuscrito**: essa é a grande vantagem — ele "viu" milhões de exemplos de caligrafia humana durante o treinamento
-    - **Extremamente preciso em palavras isoladas**: quando a imagem já está bem recortada em torno de uma única palavra, o TrOCR costuma acertar ou chegar muito perto
-    - **Arquitetura simples e direta**: sem etapas intermediárias que possam propagar erros
-
-    ### Limitações
-
-    - **Não detecta texto automaticamente**: ele precisa receber imagens já recortadas, palavra por palavra. Para documentos completos é necessário um detector externo (como o do PaddleOCR)
-    - **Pesado**: exige GPU com boa quantidade de memória (VRAM) para rodar em tempo razoável
-    - **Limitado a palavras curtas**: como gera o texto token por token, palavras muito longas podem sofrer degradação
-
-    No nosso experimento, o TrOCR representa a categoria de modelos especializados em texto manuscrito, sendo o candidato mais diretamente alinhado com a tarefa de ler receitas médicas.
     """)
     return
 
@@ -139,30 +76,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2.4 Qwen3-VL (8B)
-
-    O **Qwen3-VL** é um modelo de visão e linguagem da família Qwen, desenvolvido pelo Alibaba Cloud. A sigla "VL" significa *Vision-Language*: ele entende tanto imagens quanto texto. A versão que usamos tem 8 bilhões de parâmetros, o que o torna o modelo mais "pesado" deste comparativo.
-
-    ### Como funciona
-
-    Diferente dos outros três, o Qwen3-VL não é um OCR tradicional. Ele é um modelo de propósito geral: você mostra uma imagem, faz uma pergunta em linguagem natural, e ele responde. Nós podemos instrui-lo com um comando como: *"Transcreva fielmente o nome do medicamento manuscrito nesta imagem"*.
-
-    Por trás, ele processa a imagem em pequenos pedaços (patches) e usa um mecanismo de atenção para entender a relação entre as partes visuais e as palavras que precisa gerar. É uma abordagem muito mais flexível — o mesmo modelo pode descrever fotos, ler placas, interpretar gráficos ou traduzir textos em imagens.
-
-    ### Pontos fortes
-
-    - **Extremamente flexível**: não está limitado a OCR — podemos pedir que ele corrija erros, complete abreviações ou explique o que leu
-    - **Entende contexto**: ao contrário dos demais, ele pode usar conhecimento de mundo para inferir palavras parcialmente ilegíveis (ex.: reconhecer nomes de medicamentos conhecidos)
-    - **Alta capacidade**: 8 bilhões de parâmetros lhe dão um poder de generalização impressionante
-
-    ### Limitações
-
-    - **Muito pesado e lento**: precisa de GPU com pelo menos 16 GB de VRAM. A inferência é a mais demorada entre os quatro modelos
-    - **Pode "alucinar"**: por ser um modelo generativo, às vezes ele inventa texto que não está na imagem, especialmente quando a caligrafia é ambígua
-    - **Depende de instruções bem formuladas**: a qualidade da resposta varia bastante conforme o comando (prompt) usado
-    - **Não é especialista em OCR**: sua força é a versatilidade, não a precisão cirúrgica em transcrição de texto
-
-    No nosso experimento, o Qwen3-VL representa a nova geração de modelos multimodais, em que a leitura de texto em imagens é apenas uma das muitas habilidades — não a única.
+    ## 2.4 Qwen3-VL
     """)
     return
 
