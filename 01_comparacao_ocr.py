@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.10"
 # dependencies = [
 #     "accelerate>=1.14.0",
 #     "gdown>=5.2.0",
