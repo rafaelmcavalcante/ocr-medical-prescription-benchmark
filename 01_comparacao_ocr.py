@@ -11,6 +11,7 @@
 #     "paddleocr>=3.7.0",
 #     "pandas>=2.3.3",
 #     "pillow>=12.3.0",
+#     "plotly>=6.2.0",
 #     "pytesseract>=0.13.3",
 #     "python-levenshtein>=0.27.3",
 #     "torch>=2.13.0",
@@ -36,7 +37,7 @@ def _():
 def _(mo):
     mo.md(r"""
     # 1 Introdução
-    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte do projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de quatro alternativas de OCR: Tesseract, PaddleOCR, TrOCR e Qwen3-VL.
+    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte do projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de cinco alternativas de OCR: Tesseract, PaddleOCR, TrOCR, Qwen3-VL e OlmOCR.
     """)
     return
 
@@ -53,6 +54,25 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ## 2.1 Tesseract
+
+    O Tesseract é um programa de reconhecimento de texto (OCR) de código aberto, mantido pelo Google. Ele existe há mais de 35 anos — foi criado pela HP nos anos 1980 — e continua sendo um dos OCRs mais usados no mundo.
+
+    ### Como funciona
+
+    O Tesseract analisa a imagem em etapas: primeiro ele encontra as regiões onde há texto, depois identifica linhas e palavras e, por fim, compara cada caractere com padrões que ele já conhece. Ele não usa redes neurais modernas para o reconhecimento — seu ponto forte está em textos impressos e bem digitalizados.
+
+    ### Pontos fortes
+
+    - **Leve e rápido**: não precisa de GPU, roda até em computadores mais antigos
+    - **Gratuito e estável**: não depende de nenhum serviço online ou pagamento
+    - **Boa cobertura de idiomas**: suporta mais de 100 línguas
+
+    ### Limitações
+
+    - **Fraca com manuscrito**: como ele se baseia em formatos de letra bem definidos, tem muita dificuldade com caligrafia humana — exatamente o tipo de texto que aparece em receitas médicas
+    - **Sensível a ruído**: iluminação irregular, fundo sujo ou borrões atrapalham bastante a leitura
+
+    No nosso experimento, o Tesseract serve como baseline: um ponto de partida simples e acessível para comparar com alternativas mais modernas.
     """)
     return
 
@@ -60,7 +80,27 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2.2  PaddleOCR
+    ## 2.2 PaddleOCR (PP-OCRv6)
+
+    O **PaddleOCR** é uma plataforma de OCR desenvolvida pela Baidu, uma das maiores empresas de tecnologia da China. A versão que usamos aqui é a **PP-OCRv6**, a sexta geração do sistema, lançada em 2025.
+
+    ### Como funciona
+
+    Diferente do Tesseract, o PaddleOCR usa redes neurais profundas em todo o processo. Ele trabalha em dois estágios: primeiro um detector encontra todas as áreas de texto na imagem; depois um reconhecedor lê o conteúdo de cada área. A versão v6 trouxe melhorias significativas na qualidade do reconhecimento, especialmente para textos em condições difíceis.
+
+    ### Pontos fortes
+
+    - **Bom equilíbrio entre velocidade e precisão**: é rápido o suficiente para uso prático, mas muito mais preciso que motores clássicos
+    - **Detecção robusta**: encontra texto mesmo em imagens tortas, com sombras ou iluminação irregular
+    - **Pré-treinamento multilíngue**: reconhece bem dezenas de idiomas, incluindo alfabetos não latinos
+    - **Código aberto**: pode ser usado e modificado livremente
+
+    ### Limitações
+
+    - **Precisa de GPU para desempenho aceitável**: na CPU a inferência fica bem lenta
+    - **Não foi pensado especificamente para manuscrito**: apesar de usar redes neurais, o PP-OCRv6 foi treinado majoritariamente com texto impresso. Em caligrafia médica, seu desempenho tende a cair
+
+    No nosso experimento, o PaddleOCR representa a categoria de OCRs modernos baseados em detecção + reconhecimento.
     """)
     return
 
@@ -69,6 +109,30 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ## 2.3 TrOCR
+
+    O **TrOCR** (*Transformer-based OCR*) é um modelo criado pela Microsoft Research, apresentado em 2021. Ele possui uma versão específica para texto manuscrito, o que o torna especialmente relevante para o nosso problema de receitas médicas.
+
+    ### Como funciona
+
+    O TrOCR adota uma arquitetura do tipo *transformer*, a mesma família de modelos por trás de ferramentas como o ChatGPT. Ele tem duas partes principais: um codificador visual (baseado em ViT — *Vision Transformer*) que "enxerga" a imagem e transforma cada pedaço dela em números, e um decodificador de texto (baseado em GPT-2) que gera o texto letra por letra.
+
+    Diferente de sistemas como PaddleOCR e Tesseract, o TrOCR não tem um detector separado: ele recebe uma imagem já recortada com uma palavra e a lê diretamente, de ponta a ponta. Isso simplifica o processo e reduz fontes de erro.
+
+    Usamos aqui a versão `trocr-large-handwritten`, a maior e mais capaz da família, com cerca de 340 milhões de parâmetros.
+
+    ### Pontos fortes
+
+    - **Treinado especificamente para manuscrito**: essa é a grande vantagem — ele "viu" milhões de exemplos de caligrafia humana durante o treinamento
+    - **Extremamente preciso em palavras isoladas**: quando a imagem já está bem recortada em torno de uma única palavra, o TrOCR costuma acertar ou chegar muito perto
+    - **Arquitetura simples e direta**: sem etapas intermediárias que possam propagar erros
+
+    ### Limitações
+
+    - **Não detecta texto automaticamente**: ele precisa receber imagens já recortadas, palavra por palavra. Para documentos completos é necessário um detector externo (como o do PaddleOCR)
+    - **Pesado**: exige GPU com boa quantidade de memória (VRAM) para rodar em tempo razoável
+    - **Limitado a palavras curtas**: como gera o texto token por token, palavras muito longas podem sofrer degradação
+
+    No nosso experimento, o TrOCR representa a categoria de modelos especializados em texto manuscrito, sendo o candidato mais diretamente alinhado com a tarefa de ler receitas médicas.
     """)
     return
 
@@ -76,7 +140,63 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2.4 Qwen3-VL
+    ## 2.4 Qwen3-VL (8B)
+
+    O **Qwen3-VL** é um modelo de visão e linguagem da família Qwen, desenvolvido pelo Alibaba Cloud. A sigla "VL" significa *Vision-Language*: ele entende tanto imagens quanto texto. A versão que usamos tem 8 bilhões de parâmetros, o que o torna o modelo mais "pesado" deste comparativo.
+
+    ### Como funciona
+
+    Diferente dos outros três, o Qwen3-VL não é um OCR tradicional. Ele é um modelo de propósito geral: você mostra uma imagem, faz uma pergunta em linguagem natural, e ele responde. Nós podemos instrui-lo com um comando como: *"Transcreva fielmente o nome do medicamento manuscrito nesta imagem"*.
+
+    Por trás, ele processa a imagem em pequenos pedaços (patches) e usa um mecanismo de atenção para entender a relação entre as partes visuais e as palavras que precisa gerar. É uma abordagem muito mais flexível — o mesmo modelo pode descrever fotos, ler placas, interpretar gráficos ou traduzir textos em imagens.
+
+    ### Pontos fortes
+
+    - **Extremamente flexível**: não está limitado a OCR — podemos pedir que ele corrija erros, complete abreviações ou explique o que leu
+    - **Entende contexto**: ao contrário dos demais, ele pode usar conhecimento de mundo para inferir palavras parcialmente ilegíveis (ex.: reconhecer nomes de medicamentos conhecidos)
+    - **Alta capacidade**: 8 bilhões de parâmetros lhe dão um poder de generalização impressionante
+
+    ### Limitações
+
+    - **Muito pesado e lento**: precisa de GPU com pelo menos 16 GB de VRAM. A inferência é a mais demorada entre os quatro modelos
+    - **Pode "alucinar"**: por ser um modelo generativo, às vezes ele inventa texto que não está na imagem, especialmente quando a caligrafia é ambígua
+    - **Depende de instruções bem formuladas**: a qualidade da resposta varia bastante conforme o comando (prompt) usado
+    - **Não é especialista em OCR**: sua força é a versatilidade, não a precisão cirúrgica em transcrição de texto
+
+    No nosso experimento, o Qwen3-VL representa a nova geração de modelos multimodais, em que a leitura de texto em imagens é apenas uma das muitas habilidades — não a única.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 2.5 OlmOCR (Allen AI)
+
+    O **OlmOCR** é um modelo de OCR desenvolvido pelo Allen Institute for AI (AI2), lançado em outubro de 2025. Ele foi construído para processar documentos digitalizados complexos — PDFs, artigos científicos, formulários — extraindo o texto com alta fidelidade mesmo em páginas com múltiplas colunas, tabelas ou notas de rodapé.
+
+    ### Como funciona
+
+    O OlmOCR usa como base o modelo de visão e linguagem **Qwen2.5-VL (7B)** — um modelo multimodal que entende imagens e texto — e o especializa para OCR através de um treinamento focado em reconhecimento de documentos. Em vez de depender de um detector de texto separado, ele processa a página inteira de uma vez: o modelo "olha" para a imagem da página e gera uma transcrição completa, preservando a ordem natural de leitura.
+
+    Um diferencial importante é que ele foi treinado com um pipeline que gera artificialmente milhões de páginas sintéticas, combinando textos da web com renderização realista de PDF. Isso deu ao modelo uma exposição massiva a fontes, layouts e condições de digitalização variadas.
+
+    Usamos aqui a versão **`olmOCR-2-7B-1025-FP8`**, que é uma versão quantizada (FP8) do modelo para ocupar menos memória e rodar mais rápido.
+
+    ### Pontos fortes
+
+    - **Pensado para documentos reais**: lida bem com layouts complexos — colunas, tabelas, figuras, notas de rodapé
+    - **Base sólida**: herda a capacidade de compreensão visual e linguística do Qwen2.5-VL
+    - **Modelo quantizado (FP8)**: ocupa cerca de metade da memória do Qwen3-VL 8B, mantendo boa qualidade
+    - **Código e pesos abertos**: licença Apache 2.0, pode ser usado e adaptado livremente
+
+    ### Limitações
+
+    - **Não é especialista em manuscrito**: foi treinado majoritariamente com texto impresso e fontes digitais. Em caligrafia médica manuscrita, seu desempenho pode ser inferior ao de modelos específicos como o TrOCR
+    - **Precisa de GPU**: apesar de quantizado, ainda requer GPU com boa memória (8+ GB VRAM)
+    - **Saída verbosa**: o modelo retorna metadados YAML junto com o texto, o que exige um pós-processamento para extrair apenas a transcrição
+
+    No nosso experimento, o OlmOCR representa a **categoria de OCRs baseados em modelos de visão-linguagem especializados para documentos**, sendo uma ponte entre os OCRs tradicionais (Tesseract, PaddleOCR) e os modelos multimodais generalistas (Qwen3-VL).
     """)
     return
 
@@ -498,9 +618,44 @@ def _(AutoModelForMultimodalLM, AutoProcessor, mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## 8.5 OlmOCR
+
+    OCR baseado em Qwen2.5-VL (7B) especializado para documentos.
+    Versão quantizada FP8 para menor consumo de memória.
+    Desenvolvido pelo Allen Institute for AI (AI2).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(AutoModelForMultimodalLM, AutoProcessor, mo):
+    MODELO_OLMOCR = "allenai/olmOCR-2-7B-1025-FP8"
+
+    model_olmocr = AutoModelForMultimodalLM.from_pretrained(
+        MODELO_OLMOCR, device_map="auto"
+    ).eval()
+    processor_olmocr = AutoProcessor.from_pretrained(MODELO_OLMOCR)
+
+    mo.md(f"""
+    **OlmOCR** carregado
+
+    Modelo: `olmOCR-2-7B-1025-FP8` | device_map: `auto`
+    """)
+    return model_olmocr, processor_olmocr
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # 9 Rodando o Experimento
     """)
     return
+
+
+@app.cell(hide_code=True)
+def _():
+    from olmocr.prompts import build_no_anchoring_v4_yaml_prompt
+    return (build_no_anchoring_v4_yaml_prompt,)
 
 
 @app.cell(hide_code=True)
@@ -518,7 +673,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(Image, cv2, normalizar, os, pytesseract, time):
+def _(Image, build_no_anchoring_v4_yaml_prompt, cv2, normalizar, os, pytesseract, time):
     # ──────────────────────────────────────────────────────────
     # Funções de predição — uma por motor de OCR
     # Assinatura: (caminho_imagem, ...) -> (texto, tempo)
@@ -620,7 +775,55 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
             print(f" Qwen [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0
 
-    return predizer_paddle, predizer_qwen, predizer_tesseract, predizer_trocr
+    def predizer_olmocr(caminho_imagem, processor, model):
+        """OlmOCR — Allen AI, baseado em Qwen2.5-VL especializado para documentos."""
+        try:
+            start = time.time()
+            image = Image.open(caminho_imagem).convert("RGB")
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": image},
+                        {"type": "text", "text": build_no_anchoring_v4_yaml_prompt()},
+                    ],
+                }
+            ]
+
+            inputs = processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            ).to(model.device)
+
+            outputs = model.generate(**inputs, max_new_tokens=64)
+            raw_output = processor.decode(
+                outputs[0][inputs["input_ids"].shape[-1] :],
+                skip_special_tokens=True,
+            )
+
+            # Remove metadados YAML (tudo entre o primeiro --- e o segundo ---)
+            if raw_output.startswith("---"):
+                parts = raw_output.split("---", 2)
+                texto_limpo = parts[-1].strip() if len(parts) >= 3 else raw_output
+            else:
+                texto_limpo = raw_output
+
+            return normalizar(texto_limpo), time.time() - start
+        except Exception as e:
+            print(f" OlmOCR [{os.path.basename(caminho_imagem)}]: {e}")
+            return "", 0.0
+
+    return (
+        predizer_olmocr,
+        predizer_paddle,
+        predizer_qwen,
+        predizer_tesseract,
+        predizer_trocr,
+    )
 
 
 @app.cell(hide_code=True)
@@ -633,7 +836,7 @@ def _(mo):
 
     **Para adicionar um novo OCR:**
     1. Crie a função `predizer_*` na célula 9.1
-    2. Copie uma das células 9.3–9.5 e ajuste os parâmetros
+    2. Copie uma das células 9.3–9.7 e ajuste os parâmetros
     """)
     return
 
@@ -854,10 +1057,51 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## 9.7 OlmOCR
+
+    Baseado em Qwen2.5-VL (7B) especializado para documentos. Versão FP8 quantizada.
+    Desenvolvido pelo Allen Institute for AI.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    DIRETORIO_TESTE,
+    VOCABULARIO,
+    df_amostra,
+    mo,
+    model_olmocr,
+    partial,
+    predizer_olmocr,
+    processor_olmocr,
+    rodar_benchmark_ocr,
+):
+    NOME_CSV_OLMOCR = "resultados_olmocr.csv"
+    df_olmocr = rodar_benchmark_ocr(
+        nome="OlmOCR",
+        predizer=partial(
+            predizer_olmocr,
+            processor=processor_olmocr,
+            model=model_olmocr,
+        ),
+        score_minimo=0.1,
+        csv_saida=NOME_CSV_OLMOCR,
+        df=df_amostra,
+        diretorio=DIRETORIO_TESTE,
+        vocabulario=VOCABULARIO,
+    )
+    mo.md(f"OlmOCR: **{len(df_olmocr)}** amostras → `{NOME_CSV_OLMOCR}`")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # 10 Resultados (Tabelas)
 
     As células abaixo carregam os CSVs disponíveis e montam as comparações.
-    Rode os benchmarks que quiser (9.3–9.6) e depois venha aqui.
+    Rode os benchmarks que quiser (9.3–9.7) e depois venha aqui.
     """)
     return
 
@@ -870,6 +1114,7 @@ def _():
         ("PaddleOCR", "resultados_paddle.csv"),
         ("TrOCR", "resultados_trocr.csv"),
         ("Qwen3-VL", "resultados_qwen.csv"),
+        ("OlmOCR", "resultados_olmocr.csv"),
     ]
     return (CSVS_RESULTADO,)
 
@@ -895,7 +1140,7 @@ def _(CSVS_RESULTADO, mo, os, pd):
 
     if not dfs_disponiveis:
         mo.md(
-            "⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.5 primeiro."
+            "⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.7 primeiro."
         )
     else:
         mo.md(f"CSVs encontrados: **{', '.join(dfs_disponiveis.keys())}**")
@@ -947,7 +1192,6 @@ def _(dfs_disponiveis, mo, pd):
 
         df_painel = pd.DataFrame(_linhas)
         resultado = mo.ui.table(data=df_painel, pagination=True)
-        print("to aqui")
     resultado
     return
 
@@ -972,7 +1216,10 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, np, os, pd, plt):
+def _(CSVS_RESULTADO, mo, os, pd):
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
     # Carregar CSVs disponíveis
     _nomes = []
     _raw_acc = []
@@ -989,39 +1236,52 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
             _raw_acc80.append(_df["Accuracy80_Raw"].mean() * 100)
             _fuzzy_acc80.append(_df["Accuracy80_Fuzzy"].mean() * 100)
 
-    _x = np.arange(len(_nomes))
-    _w = 0.35
+    _fig = make_subplots(rows=1, cols=2, subplot_titles=("Word Accuracy", "Word Accuracy @80%"))
 
-    _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    # Cores e textos
+    _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes)]
 
     # Word Accuracy
-    _ax1.bar(_x - _w / 2, _raw_acc, _w, label="Raw", color="#4C72B0")
-    _ax1.bar(_x + _w / 2, _fuzzy_acc, _w, label="Fuzzy", color="#DD8452")
-    _ax1.set_ylabel("%")
-    _ax1.set_title("Word Accuracy")
-    _ax1.set_xticks(_x)
-    _ax1.set_xticklabels(_nomes, rotation=0, ha="right")
-    _ax1.legend()
-    _ax1.set_ylim(0, 105)
-    for _i, (_r, _f) in enumerate(zip(_raw_acc, _fuzzy_acc)):
-        _ax1.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
-        _ax1.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+    _fig.add_trace(
+        go.Bar(name="Raw", x=_nomes, y=_raw_acc,
+               text=[f"{v:.1f}" for v in _raw_acc], textposition="outside",
+               marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
+               hovertemplate="<b>%{x}</b><br>Raw: %{y:.1f}%<extra></extra>"),
+        row=1, col=1)
+    _fig.add_trace(
+        go.Bar(name="Fuzzy", x=_nomes, y=_fuzzy_acc,
+               text=[f"{v:.1f}" for v in _fuzzy_acc], textposition="outside",
+               marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
+               hovertemplate="<b>%{x}</b><br>Fuzzy: %{y:.1f}%<extra></extra>"),
+        row=1, col=1)
 
-    # Acc @80%
-    _ax2.bar(_x - _w / 2, _raw_acc80, _w, label="Raw", color="#4C72B0")
-    _ax2.bar(_x + _w / 2, _fuzzy_acc80, _w, label="Fuzzy", color="#DD8452")
-    _ax2.set_ylabel("%")
-    _ax2.set_title("Word Accuracy @80%")
-    _ax2.set_xticks(_x)
-    _ax2.set_xticklabels(_nomes, rotation=20, ha="right")
-    _ax2.legend()
-    _ax2.set_ylim(0, 105)
-    for _i, (_r, _f) in enumerate(zip(_raw_acc80, _fuzzy_acc80)):
-        _ax2.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
-        _ax2.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+    # Word Accuracy @80%
+    _fig.add_trace(
+        go.Bar(name="Raw", x=_nomes, y=_raw_acc80,
+               text=[f"{v:.1f}" for v in _raw_acc80], textposition="outside",
+               marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
+               hovertemplate="<b>%{x}</b><br>Raw: %{y:.1f}%<extra></extra>",
+               showlegend=False),
+        row=1, col=2)
+    _fig.add_trace(
+        go.Bar(name="Fuzzy", x=_nomes, y=_fuzzy_acc80,
+               text=[f"{v:.1f}" for v in _fuzzy_acc80], textposition="outside",
+               marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
+               hovertemplate="<b>%{x}</b><br>Fuzzy: %{y:.1f}%<extra></extra>",
+               showlegend=False),
+        row=1, col=2)
 
-    plt.tight_layout()
-    _resultado = mo.mpl.interactive(_fig)
+    _fig.update_layout(
+        barmode="group",
+        template="plotly_white",
+        height=420,
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+    )
+    _fig.update_yaxes(range=[0, 110], title="%", row=1, col=1)
+    _fig.update_yaxes(range=[0, 110], title="%", row=1, col=2)
+
+    _resultado = mo.ui.plotly(_fig)
     _resultado
     return
 
@@ -1035,7 +1295,10 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, np, os, pd, plt):
+def _(CSVS_RESULTADO, mo, os, pd):
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
     _nomes = []
     _raw_lev = []
     _fuzzy_lev = []
@@ -1052,37 +1315,51 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
             _fuzzy_cer.append(_df["CER_Fuzzy"].mean() * 100)
 
     if _nomes:
-        _x = np.arange(len(_nomes))
-        _w = 0.35
+        _fig = make_subplots(rows=1, cols=2,
+                             subplot_titles=("Levenshtein Médio (menor = melhor)",
+                                             "CER — menor = melhor"))
 
-        _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(13, 5))
-
-        # Levenshtein Médio
-        _ax1.bar(_x - _w / 2, _raw_lev, _w, label="Raw", color="#4C72B0")
-        _ax1.bar(_x + _w / 2, _fuzzy_lev, _w, label="Fuzzy", color="#DD8452")
-        _ax1.set_ylabel("Distância")
-        _ax1.set_title("Levenshtein Médio (menor = melhor)")
-        _ax1.set_xticks(_x)
-        _ax1.set_xticklabels(_nomes, rotation=20, ha="right")
-        _ax1.legend()
-        for _i, (_r, _f) in enumerate(zip(_raw_lev, _fuzzy_lev)):
-            _ax1.text(_i - _w / 2, _r + 0.1, f"{_r:.1f}", ha="center", fontsize=8)
-            _ax1.text(_i + _w / 2, _f + 0.1, f"{_f:.1f}", ha="center", fontsize=8)
+        # Levenshtein
+        _fig.add_trace(
+            go.Bar(name="Raw", x=_nomes, y=_raw_lev,
+                   text=[f"{v:.1f}" for v in _raw_lev], textposition="outside",
+                   marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
+                   hovertemplate="<b>%{x}</b><br>Raw: %{y:.2f}<extra></extra>"),
+            row=1, col=1)
+        _fig.add_trace(
+            go.Bar(name="Fuzzy", x=_nomes, y=_fuzzy_lev,
+                   text=[f"{v:.1f}" for v in _fuzzy_lev], textposition="outside",
+                   marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
+                   hovertemplate="<b>%{x}</b><br>Fuzzy: %{y:.2f}<extra></extra>"),
+            row=1, col=1)
 
         # CER
-        _ax2.bar(_x - _w / 2, _raw_cer, _w, label="Raw", color="#4C72B0")
-        _ax2.bar(_x + _w / 2, _fuzzy_cer, _w, label="Fuzzy", color="#DD8452")
-        _ax2.set_ylabel("%")
-        _ax2.set_title("CER (menor = melhor)")
-        _ax2.set_xticks(_x)
-        _ax2.set_xticklabels(_nomes, rotation=20, ha="right")
-        _ax2.legend()
-        for _i, (_r, _f) in enumerate(zip(_raw_cer, _fuzzy_cer)):
-            _ax2.text(_i - _w / 2, _r + 1.5, f"{_r:.1f}", ha="center", fontsize=8)
-            _ax2.text(_i + _w / 2, _f + 1.5, f"{_f:.1f}", ha="center", fontsize=8)
+        _fig.add_trace(
+            go.Bar(name="Raw", x=_nomes, y=_raw_cer,
+                   text=[f"{v:.1f}" for v in _raw_cer], textposition="outside",
+                   marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
+                   hovertemplate="<b>%{x}</b><br>Raw: %{y:.1f}%<extra></extra>",
+                   showlegend=False),
+            row=1, col=2)
+        _fig.add_trace(
+            go.Bar(name="Fuzzy", x=_nomes, y=_fuzzy_cer,
+                   text=[f"{v:.1f}" for v in _fuzzy_cer], textposition="outside",
+                   marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
+                   hovertemplate="<b>%{x}</b><br>Fuzzy: %{y:.1f}%<extra></extra>",
+                   showlegend=False),
+            row=1, col=2)
 
-        plt.tight_layout()
-        _resultado = mo.mpl.interactive(_fig)
+        _fig.update_layout(
+            barmode="group",
+            template="plotly_white",
+            height=420,
+            margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        )
+        _fig.update_yaxes(title="Distância", row=1, col=1)
+        _fig.update_yaxes(title="%", row=1, col=2)
+
+        _resultado = mo.ui.plotly(_fig)
 
     _resultado
     return
@@ -1101,7 +1378,9 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd, plt):
+def _(CSVS_RESULTADO, mo, os, pd):
+    import plotly.graph_objects as go
+
     _nomes = []
     _tempos = []
 
@@ -1112,29 +1391,31 @@ def _(CSVS_RESULTADO, mo, os, pd, plt):
             _tempos.append(_df["Tempo_Inferencia"].mean())
 
     if _nomes:
-        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes)]
 
-        _fig, _ax = plt.subplots(figsize=(10, 5))
-        _bars = _ax.bar(
-            _nomes, _tempos, color=_colors, edgecolor="white", linewidth=0.8
+        _fig = go.Figure()
+
+        _fig.add_trace(go.Bar(
+            x=_nomes,
+            y=_tempos,
+            marker_color=_colors,
+            marker_line=dict(color="white", width=0.8),
+            text=[f"{t:.2f}s" for t in _tempos],
+            textposition="outside",
+            textfont=dict(size=11, family="sans-serif"),
+            hovertemplate="<b>%{x}</b><br>Tempo: %{y:.3f}s<extra></extra>",
+        ))
+
+        _fig.update_layout(
+            title=dict(text="Tempo de Inferência por Modelo (menor = melhor)", font=dict(size=15)),
+            yaxis=dict(title="Tempo médio (s)", gridcolor="rgba(0,0,0,0.1)"),
+            template="plotly_white",
+            height=430,
+            margin=dict(l=20, r=20, t=50, b=20),
+            showlegend=False,
         )
 
-        for _bar, _t in zip(_bars, _tempos):
-            _ax.text(
-                _bar.get_x() + _bar.get_width() / 2,
-                _bar.get_height() + max(_tempos) * 0.02,
-                f"{_t:.2f}s",
-                ha="center",
-                fontsize=10,
-                fontweight="bold",
-            )
-
-        _ax.set_ylabel("Tempo médio (s)")
-        _ax.set_title("Tempo de Inferência por Modelo (menor = melhor)")
-        _ax.grid(axis="y", alpha=0.3, linestyle="--")
-
-        plt.tight_layout()
-        _resultado = mo.mpl.interactive(_fig)
+        _resultado = mo.ui.plotly(_fig)
     _resultado
     return
 
@@ -1152,7 +1433,10 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd, plt):
+def _(CSVS_RESULTADO, mo, os, pd):
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
     _nomes_raw = []
     _dados_raw = []
     _dados_fuzzy = []
@@ -1165,44 +1449,39 @@ def _(CSVS_RESULTADO, mo, os, pd, plt):
             _dados_fuzzy.append(_df["Similaridade_Fuzzy"].dropna().values)
 
     if _nomes_raw:
-        _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        _fig = make_subplots(rows=1, cols=2,
+                             subplot_titles=("Similaridade — Raw",
+                                             "Similaridade — Fuzzy"))
 
-        # Raw
-        _bp1 = _ax1.boxplot(
-            _dados_raw,
-            labels=_nomes_raw,
-            patch_artist=True,
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes_raw)]
+
+        for _i, (_nome, _color) in enumerate(zip(_nomes_raw, _colors)):
+            # Box Raw
+            _fig.add_trace(
+                go.Box(y=_dados_raw[_i], name=_nome, marker_color=_color,
+                       marker_opacity=0.7, boxmean="sd",
+                       hovertemplate="<b>" + _nome + "</b><br>Raw: %{y:.3f}<extra></extra>"),
+                row=1, col=1)
+            # Box Fuzzy
+            _fig.add_trace(
+                go.Box(y=_dados_fuzzy[_i], name=_nome, marker_color=_color,
+                       marker_opacity=0.7, boxmean="sd",
+                       hovertemplate="<b>" + _nome + "</b><br>Fuzzy: %{y:.3f}<extra></extra>",
+                       showlegend=False),
+                row=1, col=2)
+
+        _fig.update_layout(
+            template="plotly_white",
+            height=450,
+            margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
-        for _patch, _color in zip(
-            _bp1["boxes"],
-            ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes_raw)],
-        ):
-            _patch.set_facecolor(_color)
-            _patch.set_alpha(0.7)
-        _ax1.set_ylabel("Similaridade (Levenshtein Ratio)")
-        _ax1.set_title("Similaridade — Raw")
-        _ax1.set_ylim(0, 1.05)
-        _ax1.grid(axis="y", alpha=0.3, linestyle="--")
+        _fig.update_yaxes(range=[0, 1.05], title="Similaridade (Levenshtein Ratio)",
+                          gridcolor="rgba(0,0,0,0.1)", row=1, col=1)
+        _fig.update_yaxes(range=[0, 1.05], title="Similaridade (Levenshtein Ratio)",
+                          gridcolor="rgba(0,0,0,0.1)", row=1, col=2)
 
-        # Fuzzy
-        _bp2 = _ax2.boxplot(
-            _dados_fuzzy,
-            labels=_nomes_raw,
-            patch_artist=True,
-        )
-        for _patch, _color in zip(
-            _bp2["boxes"],
-            ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes_raw)],
-        ):
-            _patch.set_facecolor(_color)
-            _patch.set_alpha(0.7)
-        _ax2.set_ylabel("Similaridade (Levenshtein Ratio)")
-        _ax2.set_title("Similaridade — Fuzzy")
-        _ax2.set_ylim(0, 1.05)
-        _ax2.grid(axis="y", alpha=0.3, linestyle="--")
-
-        plt.tight_layout()
-        _resultado = mo.mpl.interactive(_fig)
+        _resultado = mo.ui.plotly(_fig)
     _resultado
     return
 
@@ -1220,7 +1499,9 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd, plt):
+def _(CSVS_RESULTADO, mo, os, pd):
+    import plotly.graph_objects as go
+
     _nomes = []
     _acc_raw = []
     _acc_fuzzy = []
@@ -1235,68 +1516,56 @@ def _(CSVS_RESULTADO, mo, os, pd, plt):
             _tempos.append(_df["Tempo_Inferencia"].mean())
 
     if _nomes:
-        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes)]
 
-        _fig, _ax = plt.subplots(figsize=(10, 6))
+        _fig = go.Figure()
 
-        # Raw (círculo)
-        for _i, _nome in enumerate(_nomes):
-            _ax.scatter(
-                _tempos[_i],
-                _acc_raw[_i],
-                s=180,
-                color=_colors[_i],
-                edgecolors="black",
-                linewidth=0.8,
-                zorder=5,
-                marker="o",
-                label=f"{_nome} (Raw)",
-            )
-            _ax.annotate(
-                f"{_nome}\nRaw",
-                (_tempos[_i], _acc_raw[_i]),
-                textcoords="offset points",
-                xytext=(10, 8),
-                fontsize=8,
-                fontweight="bold",
-                color=_colors[_i],
-            )
+        # Raw (círculos)
+        _fig.add_trace(go.Scatter(
+            x=_tempos, y=_acc_raw,
+            mode="markers+text",
+            text=[f"{n}\nRaw" for n in _nomes],
+            textposition="middle right",
+            textfont=dict(size=9, color=_colors, family="sans-serif"),
+            marker=dict(size=16, color=_colors, symbol="circle",
+                        line=dict(color="black", width=0.8)),
+            name="Raw",
+            hovertemplate="<b>%{text}</b><br>Tempo: %{x:.3f}s<br>Acc: %{y:.1f}%<extra></extra>",
+        ))
 
-        # Fuzzy (triângulo)
-        for _i, _nome in enumerate(_nomes):
-            _ax.scatter(
-                _tempos[_i],
-                _acc_fuzzy[_i],
-                s=140,
-                color=_colors[_i],
-                edgecolors="black",
-                linewidth=0.8,
-                zorder=5,
-                marker="D",
-                label=f"{_nome} (Fuzzy)",
-            )
-            _ax.annotate(
-                f"Fuzzy",
-                (_tempos[_i], _acc_fuzzy[_i]),
-                textcoords="offset points",
-                xytext=(10, -12),
-                fontsize=7,
-                fontstyle="italic",
-                color=_colors[_i],
-            )
+        # Fuzzy (diamantes)
+        _fig.add_trace(go.Scatter(
+            x=_tempos, y=_acc_fuzzy,
+            mode="markers+text",
+            text=["Fuzzy"] * len(_nomes),
+            textposition="bottom center",
+            textfont=dict(size=8, color=_colors, family="sans-serif"),
+            marker=dict(size=12, color=_colors, symbol="diamond",
+                        line=dict(color="black", width=0.8)),
+            name="Fuzzy",
+            hovertemplate="<b>%{x}</b><br>Acc Fuzzy: %{y:.1f}%<extra></extra>",
+        ))
 
-        _ax.set_xscale("log")
-        _ax.set_xlabel("Tempo de Inferência (s, log scale)")
-        _ax.set_ylabel("Word Accuracy (%)")
-        _ax.set_title("Trade-off: Velocidade × Acurácia")
-        _ax.grid(alpha=0.3, linestyle="--")
-        _ax.legend(loc="lower right", fontsize=7)
+        # Sombra do quadrante ideal (superior esquerdo)
+        _min_x = min(_tempos)
+        _max_x = max(_tempos)
+        _fig.add_shape(type="rect", x0=_min_x, x1=_min_x * 3.5, y0=0, y1=100,
+                       fillcolor="green", opacity=0.06, line_width=0,
+                       layer="below")
 
-        # Sombra do quadrante ideal
-        _ax.axhspan(0, 100, xmin=0, xmax=0.35, alpha=0.05, color="green")
+        _fig.update_layout(
+            title=dict(text="Trade-off: Velocidade × Acurácia", font=dict(size=15)),
+            xaxis=dict(title="Tempo de Inferência (s, log scale)", type="log",
+                       gridcolor="rgba(0,0,0,0.1)"),
+            yaxis=dict(title="Word Accuracy (%)", gridcolor="rgba(0,0,0,0.1)"),
+            template="plotly_white",
+            height=480,
+            margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=0.95,
+                        font=dict(size=10)),
+        )
 
-        plt.tight_layout()
-        _resultado = mo.mpl.interactive(_fig)
+        _resultado = mo.ui.plotly(_fig)
     _resultado
     return
 
@@ -1313,7 +1582,9 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, np, os, pd, plt):
+def _(CSVS_RESULTADO, mo, os, pd):
+    import plotly.graph_objects as go
+
     _nomes = []
     _raw_wer = []
     _fuzzy_wer = []
@@ -1326,38 +1597,32 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
             _fuzzy_wer.append(_df["WER_Fuzzy"].mean() * 100)
 
     if _nomes:
-        _x = np.arange(len(_nomes))
-        _w = 0.35
+        _fig = go.Figure()
 
-        _fig, _ax = plt.subplots(figsize=(10, 5))
+        _fig.add_trace(go.Bar(
+            name="Raw", x=_nomes, y=_raw_wer,
+            text=[f"{v:.1f}" for v in _raw_wer], textposition="outside",
+            marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
+            hovertemplate="<b>%{x}</b><br>Raw WER: %{y:.1f}%<extra></extra>",
+        ))
+        _fig.add_trace(go.Bar(
+            name="Fuzzy", x=_nomes, y=_fuzzy_wer,
+            text=[f"{v:.1f}" for v in _fuzzy_wer], textposition="outside",
+            marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
+            hovertemplate="<b>%{x}</b><br>Fuzzy WER: %{y:.1f}%<extra></extra>",
+        ))
 
-        _ax.bar(_x - _w / 2, _raw_wer, _w, label="Raw", color="#4C72B0")
-        _ax.bar(_x + _w / 2, _fuzzy_wer, _w, label="Fuzzy", color="#DD8452")
-        _ax.set_ylabel("%")
-        _ax.set_title("WER — Word Error Rate (menor = melhor)")
-        _ax.set_xticks(_x)
-        _ax.set_xticklabels(_nomes, rotation=0, ha="center")
-        _ax.legend()
-        _ax.grid(axis="y", alpha=0.3, linestyle="--")
+        _fig.update_layout(
+            title=dict(text="WER — Word Error Rate (menor = melhor)", font=dict(size=15)),
+            yaxis=dict(title="%", gridcolor="rgba(0,0,0,0.1)"),
+            barmode="group",
+            template="plotly_white",
+            height=430,
+            margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        )
 
-        for _i, (_r, _f) in enumerate(zip(_raw_wer, _fuzzy_wer)):
-            _ax.text(
-                _i - _w / 2,
-                _r + max(_raw_wer) * 0.02,
-                f"{_r:.1f}",
-                ha="center",
-                fontsize=8,
-            )
-            _ax.text(
-                _i + _w / 2,
-                _f + max(_fuzzy_wer) * 0.02,
-                f"{_f:.1f}",
-                ha="center",
-                fontsize=8,
-            )
-
-        plt.tight_layout()
-        _resultado = mo.mpl.interactive(_fig)
+        _resultado = mo.ui.plotly(_fig)
     _resultado
     return
 
@@ -1518,7 +1783,10 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, np, os, pd, plt):
+def _(CSVS_RESULTADO, mo, os, pd):
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
     _nomes = []
     _dataframes = []
 
@@ -1533,16 +1801,13 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
         _faixas = [(1, 3), (4, 6), (7, 9), (10, 12), (13, 20)]
         _rotulos = [f"{a}-{b}" for a, b in _faixas]
 
-        _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(15, 5))
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes)]
 
-        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
-        _x = np.arange(len(_rotulos))
-        _w = 0.8 / len(_nomes)
+        _fig = make_subplots(rows=1, cols=2,
+                             subplot_titles=("Word Accuracy por Comprimento — Raw",
+                                             "Word Accuracy por Comprimento — Fuzzy"))
 
-        for _variante, _ax, _titulo in [
-            ("Raw", _ax1, "Word Accuracy por Comprimento — Raw"),
-            ("Fuzzy", _ax2, "Word Accuracy por Comprimento — Fuzzy"),
-        ]:
+        for _col, (_variante, _titulo) in enumerate([("Raw", ""), ("Fuzzy", "")], 1):
             for _idx, (_nome, _df) in enumerate(zip(_nomes, _dataframes)):
                 _accs = []
                 for _lo, _hi in _faixas:
@@ -1554,28 +1819,30 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
                     else:
                         _accs.append(0)
 
-                _offset = (_idx - len(_nomes) / 2 + 0.5) * _w
-                _ax.bar(
-                    _x + _offset,
-                    _accs,
-                    _w,
-                    label=_nome,
-                    color=_colors[_idx],
-                    edgecolor="white",
-                    linewidth=0.5,
-                )
+                _fig.add_trace(
+                    go.Bar(name=_nome, x=_rotulos, y=_accs,
+                           marker_color=_colors[_idx],
+                           marker_line=dict(color="white", width=0.5),
+                           hovertemplate=f"<b>{_nome}</b><br>{_variante}: " + "%{y:.1f}%<br>Faixa: %{x}<extra></extra>",
+                           showlegend=(_col == 1)),
+                    row=1, col=_col)
 
-            _ax.set_xlabel("Comprimento da palavra (caracteres)")
-            _ax.set_ylabel("Word Accuracy (%)")
-            _ax.set_title(_titulo)
-            _ax.set_xticks(_x)
-            _ax.set_xticklabels(_rotulos)
-            _ax.legend(fontsize=7)
-            _ax.grid(axis="y", alpha=0.3, linestyle="--")
-            _ax.set_ylim(0, 105)
+        _fig.update_layout(
+            barmode="group",
+            template="plotly_white",
+            height=450,
+            margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5,
+                        font=dict(size=10)),
+        )
+        _fig.update_yaxes(range=[0, 110], title="Word Accuracy (%)",
+                          gridcolor="rgba(0,0,0,0.1)", row=1, col=1)
+        _fig.update_yaxes(range=[0, 110], title="Word Accuracy (%)",
+                          gridcolor="rgba(0,0,0,0.1)", row=1, col=2)
+        _fig.update_xaxes(title="Comprimento da palavra (caracteres)", row=1, col=1)
+        _fig.update_xaxes(title="Comprimento da palavra (caracteres)", row=1, col=2)
 
-        plt.tight_layout()
-        _resultado = mo.mpl.interactive(_fig)
+        _resultado = mo.ui.plotly(_fig)
     _resultado
     return
 
