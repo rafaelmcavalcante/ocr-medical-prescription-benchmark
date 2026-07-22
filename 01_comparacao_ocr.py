@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #     "accelerate>=1.14.0",
 #     "gdown>=5.2.0",
@@ -7,6 +7,7 @@
 #     "marimo>=0.23.14",
 #     "matplotlib>=3.10.9",
 #     "numpy>=2.2.6",
+#     "olmocr>=0.4.0",
 #     "opencv-python>=5.0.0.93",
 #     "paddleocr>=3.7.0",
 #     "pandas>=2.3.3",
@@ -36,7 +37,7 @@ def _():
 def _(mo):
     mo.md(r"""
     # 1 Introdução
-    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte do projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de quatro alternativas de OCR: Tesseract, PaddleOCR, TrOCR e Qwen3-VL.
+    Esse trabalho busca comparar diferentes modelos e plataformas de OCR no contexto de reconhecimento de receitas médicas, como parte do projeto REVAI 4.0 no LIAD (Laboratório de Inteligência Artifical E Arquiteturas Dedicadas) na UFCG. Nesse notebook, iremos comparar o desempenho de cinco alternativas de OCR: Tesseract, PaddleOCR, TrOCR, Qwen3-VL e OlmOCR.
     """)
     return
 
@@ -170,6 +171,39 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## 2.5 OlmOCR (Allen AI)
+
+    O **OlmOCR** é um modelo de OCR desenvolvido pelo Allen Institute for AI (AI2), lançado em outubro de 2025. Ele foi construído para processar documentos digitalizados complexos — PDFs, artigos científicos, formulários — extraindo o texto com alta fidelidade mesmo em páginas com múltiplas colunas, tabelas ou notas de rodapé.
+
+    ### Como funciona
+
+    O OlmOCR usa como base o modelo de visão e linguagem **Qwen2.5-VL (7B)** — um modelo multimodal que entende imagens e texto — e o especializa para OCR através de um treinamento focado em reconhecimento de documentos. Em vez de depender de um detector de texto separado, ele processa a página inteira de uma vez: o modelo "olha" para a imagem da página e gera uma transcrição completa, preservando a ordem natural de leitura.
+
+    Um diferencial importante é que ele foi treinado com um pipeline que gera artificialmente milhões de páginas sintéticas, combinando textos da web com renderização realista de PDF. Isso deu ao modelo uma exposição massiva a fontes, layouts e condições de digitalização variadas.
+
+    Usamos aqui a versão **`olmOCR-2-7B-1025-FP8`**, que é uma versão quantizada (FP8) do modelo para ocupar menos memória e rodar mais rápido.
+
+    ### Pontos fortes
+
+    - **Pensado para documentos reais**: lida bem com layouts complexos — colunas, tabelas, figuras, notas de rodapé
+    - **Base sólida**: herda a capacidade de compreensão visual e linguística do Qwen2.5-VL
+    - **Modelo quantizado (FP8)**: ocupa cerca de metade da memória do Qwen3-VL 8B, mantendo boa qualidade
+    - **Código e pesos abertos**: licença Apache 2.0, pode ser usado e adaptado livremente
+
+    ### Limitações
+
+    - **Não é especialista em manuscrito**: foi treinado majoritariamente com texto impresso e fontes digitais. Em caligrafia médica manuscrita, seu desempenho pode ser inferior ao de modelos específicos como o TrOCR
+    - **Precisa de GPU**: apesar de quantizado, ainda requer GPU com boa memória (8+ GB VRAM)
+    - **Saída verbosa**: o modelo retorna metadados YAML junto com o texto, o que exige um pós-processamento para extrair apenas a transcrição
+
+    No nosso experimento, o OlmOCR representa a **categoria de OCRs baseados em modelos de visão-linguagem especializados para documentos**, sendo uma ponte entre os OCRs tradicionais (Tesseract, PaddleOCR) e os modelos multimodais generalistas (Qwen3-VL).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # 3 Dataset
     O dataset utilizado é o [RxHandBD](https://zenodo.org/records/18478741), que prove uma coleção padronizada e pronta para uso de 5.578 palavras manuscritas extraídas de prescrições médicas.
     """)
@@ -223,6 +257,7 @@ def _():
 
     from functools import partial
 
+    from olmocr.prompts import build_no_anchoring_v4_yaml_prompt
     from paddleocr import PaddleOCR
     from PIL import Image
     from transformers import (
@@ -242,6 +277,7 @@ def _():
         RobertaTokenizer,
         ViTImageProcessor,
         VisionEncoderDecoderModel,
+        build_no_anchoring_v4_yaml_prompt,
         cv2,
         jiwer,
         np,
@@ -563,6 +599,35 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 8.5 OlmOCR
+
+    OCR baseado em Qwen2.5-VL (7B) especializado para documentos.
+    Versão quantizada FP8 para menor consumo de memória.
+    Desenvolvido pelo Allen Institute for AI (AI2).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(AutoModelForMultimodalLM, AutoProcessor, mo):
+    MODELO_OLMOCR = "allenai/olmOCR-2-7B-1025-FP8"
+
+    model_olmocr = AutoModelForMultimodalLM.from_pretrained(
+        MODELO_OLMOCR, device_map="auto"
+    ).eval()
+    processor_olmocr = AutoProcessor.from_pretrained(MODELO_OLMOCR)
+
+    mo.md(f"""
+    **OlmOCR** carregado
+
+    Modelo: `olmOCR-2-7B-1025-FP8` | device_map: `auto`
+    """)
+    return model_olmocr, processor_olmocr
+
+
+@app.cell(hide_code=True)
 def _(AutoModelForMultimodalLM, AutoProcessor, mo):
     MODELO_QWEN = "Qwen/Qwen3-VL-8B-Instruct"
 
@@ -602,7 +667,15 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(Image, cv2, normalizar, os, pytesseract, time):
+def _(
+    Image,
+    build_no_anchoring_v4_yaml_prompt,
+    cv2,
+    normalizar,
+    os,
+    pytesseract,
+    time,
+):
     # ──────────────────────────────────────────────────────────
     # Funções de predição — uma por motor de OCR
     # Assinatura: (caminho_imagem, ...) -> (texto, tempo)
@@ -663,6 +736,48 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
             print(f" Tesseract [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0
 
+    def predizer_olmocr(caminho_imagem, processor, model):
+        """OlmOCR — Allen AI, baseado em Qwen2.5-VL especializado para documentos."""
+        try:
+            start = time.time()
+            image = Image.open(caminho_imagem).convert("RGB")
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": image},
+                        {"type": "text", "text": build_no_anchoring_v4_yaml_prompt()},
+                    ],
+                }
+            ]
+
+            inputs = processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            ).to(model.device)
+
+            outputs = model.generate(**inputs, max_new_tokens=64)
+            raw_output = processor.decode(
+                outputs[0][inputs["input_ids"].shape[-1] :],
+                skip_special_tokens=True,
+            )
+
+            # Remove metadados YAML (tudo entre o primeiro --- e o segundo ---)
+            if raw_output.startswith("---"):
+                parts = raw_output.split("---", 2)
+                texto_limpo = parts[-1].strip() if len(parts) >= 3 else raw_output
+            else:
+                texto_limpo = raw_output
+
+            return normalizar(texto_limpo), time.time() - start
+        except Exception as e:
+            print(f" OlmOCR [{os.path.basename(caminho_imagem)}]: {e}")
+            return "", 0.0
+
     def predizer_qwen(caminho_imagem, processor, model):
         """Qwen3-VL — modelo multimodal para OCR via instrução."""
         try:
@@ -704,7 +819,13 @@ def _(Image, cv2, normalizar, os, pytesseract, time):
             print(f" Qwen [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0
 
-    return predizer_paddle, predizer_qwen, predizer_tesseract, predizer_trocr
+    return (
+        predizer_olmocr,
+        predizer_paddle,
+        predizer_qwen,
+        predizer_tesseract,
+        predizer_trocr,
+    )
 
 
 @app.cell(hide_code=True)
@@ -717,7 +838,7 @@ def _(mo):
 
     **Para adicionar um novo OCR:**
     1. Crie a função `predizer_*` na célula 9.1
-    2. Copie uma das células 9.3–9.5 e ajuste os parâmetros
+    2. Copie uma das células 9.3–9.7 e ajuste os parâmetros
     """)
     return
 
@@ -938,10 +1059,51 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## 9.7 OlmOCR
+
+    Baseado em Qwen2.5-VL (7B) especializado para documentos. Versão FP8 quantizada.
+    Desenvolvido pelo Allen Institute for AI.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    DIRETORIO_TESTE,
+    VOCABULARIO,
+    df_amostra,
+    mo,
+    model_olmocr,
+    partial,
+    predizer_olmocr,
+    processor_olmocr,
+    rodar_benchmark_ocr,
+):
+    NOME_CSV_OLMOCR = "resultados_olmocr.csv"
+    df_olmocr = rodar_benchmark_ocr(
+        nome="OlmOCR",
+        predizer=partial(
+            predizer_olmocr,
+            processor=processor_olmocr,
+            model=model_olmocr,
+        ),
+        score_minimo=0.1,
+        csv_saida=NOME_CSV_OLMOCR,
+        df=df_amostra,
+        diretorio=DIRETORIO_TESTE,
+        vocabulario=VOCABULARIO,
+    )
+    mo.md(f"OlmOCR: **{len(df_olmocr)}** amostras → `{NOME_CSV_OLMOCR}`")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # 10 Resultados (Tabelas)
 
     As células abaixo carregam os CSVs disponíveis e montam as comparações.
-    Rode os benchmarks que quiser (9.3–9.6) e depois venha aqui.
+    Rode os benchmarks que quiser (9.3–9.7) e depois venha aqui.
     """)
     return
 
@@ -954,6 +1116,7 @@ def _():
         ("PaddleOCR", "resultados_paddle.csv"),
         ("TrOCR", "resultados_trocr.csv"),
         ("Qwen3-VL", "resultados_qwen.csv"),
+        ("OlmOCR", "resultados_olmocr.csv"),
     ]
     return (CSVS_RESULTADO,)
 
@@ -979,7 +1142,7 @@ def _(CSVS_RESULTADO, mo, os, pd):
 
     if not dfs_disponiveis:
         mo.md(
-            "⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.5 primeiro."
+            "⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.7 primeiro."
         )
     else:
         mo.md(f"CSVs encontrados: **{', '.join(dfs_disponiveis.keys())}**")
@@ -1196,7 +1359,7 @@ def _(CSVS_RESULTADO, mo, os, pd, plt):
             _tempos.append(_df["Tempo_Inferencia"].mean())
 
     if _nomes:
-        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes)]
 
         _fig, _ax = plt.subplots(figsize=(10, 5))
         _bars = _ax.bar(
@@ -1259,7 +1422,7 @@ def _(CSVS_RESULTADO, mo, os, pd, plt):
         )
         for _patch, _color in zip(
             _bp1["boxes"],
-            ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes_raw)],
+            ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes_raw)],
         ):
             _patch.set_facecolor(_color)
             _patch.set_alpha(0.7)
@@ -1276,7 +1439,7 @@ def _(CSVS_RESULTADO, mo, os, pd, plt):
         )
         for _patch, _color in zip(
             _bp2["boxes"],
-            ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes_raw)],
+            ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes_raw)],
         ):
             _patch.set_facecolor(_color)
             _patch.set_alpha(0.7)
@@ -1319,7 +1482,7 @@ def _(CSVS_RESULTADO, mo, os, pd, plt):
             _tempos.append(_df["Tempo_Inferencia"].mean())
 
     if _nomes:
-        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes)]
 
         _fig, _ax = plt.subplots(figsize=(10, 6))
 
@@ -1619,7 +1782,7 @@ def _(CSVS_RESULTADO, mo, np, os, pd, plt):
 
         _fig, (_ax1, _ax2) = plt.subplots(1, 2, figsize=(15, 5))
 
-        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452"][: len(_nomes)]
+        _colors = ["#55A868", "#4C72B0", "#C44E52", "#DD8452", "#937860"][: len(_nomes)]
         _x = np.arange(len(_rotulos))
         _w = 0.8 / len(_nomes)
 
