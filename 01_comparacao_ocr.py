@@ -122,6 +122,7 @@ def _(mo):
 
 @app.cell
 def _():
+    import accelerate
     import os
     import time
     import urllib.request
