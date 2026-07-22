@@ -82,7 +82,7 @@ def _(mo):
     mo.md(r"""
     ## 2.2 PaddleOCR (PP-OCRv6)
 
-    O **PaddleOCR** é uma plataforma de OCR desenvolvida pela Baidu, uma das maiores empresas de tecnologia da China. A versão que usamos aqui é a **PP-OCRv6**, a sexta geração do sistema, lançada em 2025.
+    O **PaddleOCR** é uma plataforma de OCR desenvolvida pela Baidu, uma das maiores empresas de tecnologia da China. A versão que usamos aqui é a PP-OCRv6, a sexta geração do sistema, lançada em 2026.
 
     ### Como funciona
 
@@ -142,7 +142,7 @@ def _(mo):
     mo.md(r"""
     ## 2.4 Qwen3-VL (8B)
 
-    O **Qwen3-VL** é um modelo de visão e linguagem da família Qwen, desenvolvido pelo Alibaba Cloud. A sigla "VL" significa *Vision-Language*: ele entende tanto imagens quanto texto. A versão que usamos tem 8 bilhões de parâmetros, o que o torna o modelo mais "pesado" deste comparativo.
+    O Qwen3-VL é um modelo de visão e linguagem da família Qwen, desenvolvido pelo Alibaba Cloud. A sigla "VL" significa *Vision-Language*: ele entende tanto imagens quanto texto. A versão que usamos tem 8 bilhões de parâmetros, o que o torna o modelo mais "pesado" deste comparativo.
 
     ### Como funciona
 
@@ -177,7 +177,7 @@ def _(mo):
 
     ### Como funciona
 
-    O OlmOCR usa como base o modelo de visão e linguagem **Qwen2.5-VL (7B)** — um modelo multimodal que entende imagens e texto — e o especializa para OCR através de um treinamento focado em reconhecimento de documentos. Em vez de depender de um detector de texto separado, ele processa a página inteira de uma vez: o modelo "olha" para a imagem da página e gera uma transcrição completa, preservando a ordem natural de leitura.
+    O OlmOCR usa como base o modelo de visão e linguagem Qwen2.5-VL (7B) — um modelo multimodal que entende imagens e texto — e o especializa para OCR através de um treinamento focado em reconhecimento de documentos. Em vez de depender de um detector de texto separado, ele processa a página inteira de uma vez: o modelo "olha" para a imagem da página e gera uma transcrição completa, preservando a ordem natural de leitura.
 
     Um diferencial importante é que ele foi treinado com um pipeline que gera artificialmente milhões de páginas sintéticas, combinando textos da web com renderização realista de PDF. Isso deu ao modelo uma exposição massiva a fontes, layouts e condições de digitalização variadas.
 
@@ -254,10 +254,12 @@ def _():
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
+    import plotly.graph_objects as go
     import pytesseract
     import torch
 
     from functools import partial
+    from plotly.subplots import make_subplots
 
     from paddleocr import PaddleOCR
     from PIL import Image
@@ -279,12 +281,13 @@ def _():
         ViTImageProcessor,
         VisionEncoderDecoderModel,
         cv2,
+        go,
         jiwer,
+        make_subplots,
         np,
         os,
         partial,
         pd,
-        plt,
         pytesseract,
         time,
         torch,
@@ -653,12 +656,6 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _():
-    from olmocr.prompts import build_no_anchoring_v4_yaml_prompt
-    return (build_no_anchoring_v4_yaml_prompt,)
-
-
-@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     ## 9.1 Funções de Predição
@@ -673,7 +670,15 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(Image, build_no_anchoring_v4_yaml_prompt, cv2, normalizar, os, pytesseract, time):
+def _(
+    Image,
+    build_no_anchoring_v4_yaml_prompt,
+    cv2,
+    normalizar,
+    os,
+    pytesseract,
+    time,
+):
     # ──────────────────────────────────────────────────────────
     # Funções de predição — uma por motor de OCR
     # Assinatura: (caminho_imagem, ...) -> (texto, tempo)
@@ -1216,10 +1221,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd):
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
+def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
     # Carregar CSVs disponíveis
     _nomes = []
     _raw_acc = []
@@ -1295,10 +1297,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd):
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
+def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
     _nomes = []
     _raw_lev = []
     _fuzzy_lev = []
@@ -1378,9 +1377,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd):
-    import plotly.graph_objects as go
-
+def _(CSVS_RESULTADO, go, mo, os, pd):
     _nomes = []
     _tempos = []
 
@@ -1433,10 +1430,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd):
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
+def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
     _nomes_raw = []
     _dados_raw = []
     _dados_fuzzy = []
@@ -1499,9 +1493,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd):
-    import plotly.graph_objects as go
-
+def _(CSVS_RESULTADO, go, mo, os, pd):
     _nomes = []
     _acc_raw = []
     _acc_fuzzy = []
@@ -1582,9 +1574,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd):
-    import plotly.graph_objects as go
-
+def _(CSVS_RESULTADO, go, mo, os, pd):
     _nomes = []
     _raw_wer = []
     _fuzzy_wer = []
@@ -1641,9 +1631,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, np, os, pd):
-    import plotly.graph_objects as go
-
+def _(CSVS_RESULTADO, go, mo, np, os, pd):
     _nomes = []
     _metricas_data = []
 
@@ -1783,10 +1771,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, mo, os, pd):
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
+def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
     _nomes = []
     _dataframes = []
 
