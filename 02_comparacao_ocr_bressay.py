@@ -248,9 +248,9 @@ def _(mo, os, urllib, zipfile):
             else:
                 urllib.request.urlretrieve(DATASET_URL, zip_path)
 
-        # Extrai diretamente para a pasta bressay/
+        # Extrai na raiz (o zip já contém a pasta bressay/ internamente)
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall("bressay")
+            zf.extractall(".")
         mo.md("Dataset extraído!")
     else:
         mo.md("Dataset BRESSAY já existe localmente.")
@@ -268,7 +268,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, os, pd, DATASET_DIR):
+def _(DATASET_DIR, mo, os, pd):
     # ── Caminhos do dataset BRESSAY ──
     DIRETORIO_WORDS = os.path.join(DATASET_DIR, "data", "words")
     ARQUIVO_TESTE = os.path.join(DATASET_DIR, "sets", "test.txt")
