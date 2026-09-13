@@ -248,7 +248,7 @@ def _(mo):
 def _(AutoModelForMultimodalLM, AutoProcessor, CFG, LoraConfig, get_peft_model, mo, torch):
     processor = AutoProcessor.from_pretrained(CFG.MODELO_BASE)
     model = AutoModelForMultimodalLM.from_pretrained(
-        CFG.MODELO_BASE, torch_dtype=torch.bfloat16
+        CFG.MODELO_BASE, dtype=torch.bfloat16
     )
     model.to("cuda")
 
@@ -423,7 +423,11 @@ def _(CFG, TrainingArguments, Trainer, collate_fn, ds_treino, ds_valid, model, m
         optim="adamw_torch",
         report_to="none",
         remove_unused_columns=False,
-        dataloader_num_workers=4,
+        # 0 = sem multiprocessing. Com CUDA, o DataLoader usa "spawn" e o
+        # worker não consegue importar BressayDataset (definida em célula do
+        # marimo, em __marimo__cell_*.py). Se quiser workers, mova a classe
+        # BressayDataset para um módulo .py separado e importe-o.
+        dataloader_num_workers=0,
         seed=CFG.SEED,
     )
     trainer = Trainer(
