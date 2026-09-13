@@ -171,6 +171,8 @@ def _():
     import psutil
     import torch
 
+    import gdown
+
     from functools import partial
     from plotly.subplots import make_subplots
 
@@ -194,6 +196,7 @@ def _():
         ViTImageProcessor,
         VisionEncoderDecoderModel,
         cv2,
+        gdown,
         go,
         jiwer,
         make_subplots,
@@ -230,7 +233,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, os, urllib, zipfile):
+def _(gdown, mo, os, urllib, zipfile):
     DATASET_URL = "https://drive.google.com/file/d/1XACLMLMLuMs_6EpNaOD8nd-Nn5X9T7eH/view?usp=sharing"
     DATASET_DIR = "bressay"
 
@@ -239,14 +242,7 @@ def _(mo, os, urllib, zipfile):
         if not os.path.exists(zip_path):
             print("Baixando dataset BRESSAY...")
             if "drive.google.com" in DATASET_URL:
-                try:
-                    import gdown
-
-                    gdown.download(DATASET_URL, zip_path, quiet=False)
-                except ImportError:
-                    raise ImportError(
-                        "Para links do Google Drive, instale gdown: pip install gdown"
-                    )
+                gdown.download(DATASET_URL, zip_path, quiet=False)
             else:
                 urllib.request.urlretrieve(DATASET_URL, zip_path)
 
@@ -660,25 +656,45 @@ def _(mo):
     ## 8.5 Qwen3-VL fine-tuned (LoRA)
 
     Modelo ajustado no BRESSAY pelo notebook `03_finetune_qwen_bressay.py`.
-    Se a pasta `qwen3vl_ft_bressay/` não existir, a seção 9.9 é pulada.
+    Se a pasta `qwen3vl_ft_bressay/` não existir, ela é baixada do Google Drive.
     """)
     return
 
 
 @app.cell(hide_code=True)
-def _(AutoModelForMultimodalLM, AutoProcessor, gpu_disponivel, mo, os):
-    DIR_QWEN_FT = "qwen3vl_ft_bressay"
+def _(gdown, mo, os, zipfile):
+    # ── Download do modelo fine-tuned (se necessário) ──
+    MODELO_FT_URL = "https://drive.google.com/file/d/1vEL7W92mi5GHCedZX4RPuEAiZq7zxNu1/view?usp=drive_link"
+    MODELO_FT_DIR = "qwen3vl_ft_bressay"
 
+    if not os.path.isdir(MODELO_FT_DIR):
+        _zip_ft = "qwen3vl_ft_bressay.zip"
+        if not os.path.exists(_zip_ft):
+            print("Baixando modelo Qwen3-VL fine-tuned...")
+            gdown.download(MODELO_FT_URL, _zip_ft, quiet=False)
+
+        # O zip contém a pasta qwen3vl_ft_bressay/ internamente
+        with zipfile.ZipFile(_zip_ft, "r") as _zf:
+            _zf.extractall(".")
+        _msg_modelo_ft = "Modelo fine-tuned baixado e extraído!"
+    else:
+        _msg_modelo_ft = "Modelo fine-tuned já existe localmente."
+    mo.md(_msg_modelo_ft)
+    return (MODELO_FT_DIR,)
+
+
+@app.cell(hide_code=True)
+def _(AutoModelForMultimodalLM, AutoProcessor, MODELO_FT_DIR, gpu_disponivel, mo, os):
     model_qwen_ft = None
     processor_qwen_ft = None
-    if gpu_disponivel and os.path.isdir(DIR_QWEN_FT):
-        processor_qwen_ft = AutoProcessor.from_pretrained(DIR_QWEN_FT)
+    if gpu_disponivel and os.path.isdir(MODELO_FT_DIR):
+        processor_qwen_ft = AutoProcessor.from_pretrained(MODELO_FT_DIR)
         model_qwen_ft = AutoModelForMultimodalLM.from_pretrained(
-            DIR_QWEN_FT, device_map="auto"
+            MODELO_FT_DIR, device_map="auto"
         )
 
     _status_ft = "✅ carregado" if model_qwen_ft is not None else "❌ não encontrado"
-    mo.md(f"**Qwen3-VL FT** — {_status_ft} (`{DIR_QWEN_FT}/`)")
+    mo.md(f"**Qwen3-VL FT** — {_status_ft} (`{MODELO_FT_DIR}/`)")
     return model_qwen_ft, processor_qwen_ft
 
 
