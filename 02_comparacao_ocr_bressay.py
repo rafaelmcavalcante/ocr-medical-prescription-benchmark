@@ -62,7 +62,7 @@ def _(mo):
     | Aspecto | Detalhe |
     |---|---|
     | **GPU** | Suporta CUDA (recomendado) |
-    | **CPU** | ✅ Suporta inferência em CPU |
+    | **CPU** | Suporta inferência em CPU |
     """)
     return
 
@@ -77,7 +77,7 @@ def _(mo):
     | Aspecto | Detalhe |
     |---|---|
     | **GPU** | CUDA recomendado (~4 GB VRAM) |
-    | **CPU** | ✅ Possível, porém lento (~10-30× mais lento que GPU) |
+    | **CPU** | Possível, porém lento (~10-30× mais lento que GPU) |
     """)
     return
 
@@ -92,7 +92,7 @@ def _(mo):
     | Aspecto | Detalhe |
     |---|---|
     | **GPU** | CUDA necessário (~16 GB VRAM) |
-    | **CPU** | ⚠️ Tecnicamente possível, mas extremamente lento (minutos por palavra). Não recomendado. |
+    | **CPU** | Tecnicamente possível, mas extremamente lento (minutos por palavra). Não recomendado. |
     """)
     return
 
@@ -132,7 +132,6 @@ def _(mo):
     | **VRAM Pico** | Memória máxima alocada na GPU durante inferência | MB (apenas GPU) |
     | **RAM Pico** | Memória máxima alocada na CPU durante inferência | MB (apenas CPU) |
 
-    > ⚠️ **Eficiência energética**: a medição de consumo de energia (W) requer hardware especializado (ex.: NVIDIA Power Meter, nvidia-smi com suporte a power draw). Não foi incluída neste notebook pois depende de sensores físicos não disponíveis em todos os ambientes.
     """)
     return
 
@@ -262,7 +261,14 @@ def _(mo):
     mo.md(r"""
     ## 6.2 Estrutura do BRESSAY
 
-    O dataset BRESSAY contém redações manuscritas em português brasileiro. Utilizamos o subconjunto de palavras (`data/words/`), onde cada imagem PNG tem um arquivo TXT correspondente com a transcrição. As partições são definidas em `sets/`.
+    O dataset BRESSAY contém redações manuscritas em português brasileiro, segmentadas em quatro níveis: **palavras** (`data/words/`), **linhas** (`data/lines/`), **parágrafos** (`data/paragraphs/`) e **páginas** (`data/pages/`). Cada imagem PNG tem um arquivo TXT correspondente com a transcrição. As partições são definidas em `sets/`.
+
+    Neste notebook usamos três níveis para as comparações:
+    - **Palavras** — imagens de palavras isoladas;
+    - **Frases** — linhas de texto manuscrito;
+    - **Textos** — parágrafos completos.
+
+    > O dataset não possui recorte por **letras isoladas**, então esse nível não é avaliado.
     """)
     return
 
@@ -270,85 +276,112 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(DATASET_DIR, mo, os, pd):
     # ── Caminhos do dataset BRESSAY ──
-    DIRETORIO_WORDS = os.path.join(DATASET_DIR, "data", "words")
-    ARQUIVO_TESTE = os.path.join(DATASET_DIR, "sets", "test.txt")
-    ARQUIVO_TREINO = os.path.join(DATASET_DIR, "sets", "training.txt")
+    _ARQUIVO_TESTE = os.path.join(DATASET_DIR, "sets", "test.txt")
 
     # ── Carregar lista de páginas do conjunto de teste ──
-    with open(ARQUIVO_TESTE, "r") as f:
-        paginas_teste = [linha.strip() for linha in f if linha.strip()]
+    with open(_ARQUIVO_TESTE, "r") as f:
+        _paginas_teste = [linha.strip() for linha in f if linha.strip()]
 
-    # ── Construir DataFrame com todas as palavras do teste ──
-    registros = []
-    for pagina in paginas_teste:
-        pasta_pagina = os.path.join(DIRETORIO_WORDS, pagina)
-        if not os.path.isdir(pasta_pagina):
-            continue
-        for arquivo in os.listdir(pasta_pagina):
-            if arquivo.endswith(".png"):
-                caminho_img = os.path.join(pagina, arquivo)
-                caminho_txt = os.path.join(pasta_pagina, arquivo.replace(".png", ".txt"))
-                if os.path.exists(caminho_txt):
-                    with open(caminho_txt, "r") as f:
-                        transcricao = f.read().strip()
-                    registros.append({"Images": caminho_img, "Text": transcricao})
+    # ── Níveis de segmentação usados na comparação ──
+    # O BRESSAY não possui recorte por letras isoladas.
+    _TIPOS_SEGMENTACAO = {
+        "palavras": "words",
+        "frases": "lines",
+        "textos": "paragraphs",
+    }
 
-    df_test = pd.DataFrame(registros)
+    def _carregar_tipo(nome_tipo: str, pasta_tipo: str) -> pd.DataFrame:
+        """Carrega um nível de segmentação do conjunto de teste."""
+        registros = []
+        raiz = os.path.join(DATASET_DIR, "data", pasta_tipo)
+        for pagina in _paginas_teste:
+            pasta_pagina = os.path.join(raiz, pagina)
+            if not os.path.isdir(pasta_pagina):
+                continue
+            for arquivo in os.listdir(pasta_pagina):
+                if arquivo.endswith(".png"):
+                    caminho_img = os.path.join(pasta_pagina, arquivo)
+                    caminho_txt = os.path.join(
+                        pasta_pagina, arquivo.replace(".png", ".txt")
+                    )
+                    if os.path.exists(caminho_txt):
+                        with open(caminho_txt, "r") as f:
+                            transcricao = f.read().strip()
+                        registros.append(
+                            {
+                                "Tipo": nome_tipo,
+                                "Images": caminho_img,
+                                "Text": transcricao,
+                            }
+                        )
+        return pd.DataFrame(registros)
 
-    # ── Carregar vocabulário de treino ──
-    with open(ARQUIVO_TREINO, "r") as f:
-        paginas_treino = [linha.strip() for linha in f if linha.strip()]
+    _dfs_por_tipo = {
+        nome: _carregar_tipo(nome, pasta)
+        for nome, pasta in _TIPOS_SEGMENTACAO.items()
+    }
 
-    vocab_treino = set()
-    for pagina in paginas_treino:
-        pasta_pagina = os.path.join(DIRETORIO_WORDS, pagina)
-        if not os.path.isdir(pasta_pagina):
-            continue
-        for arquivo in os.listdir(pasta_pagina):
-            if arquivo.endswith(".txt"):
-                with open(os.path.join(pasta_pagina, arquivo), "r") as f:
-                    vocab_treino.add(f.read().strip())
+    _df_test = pd.concat(_dfs_por_tipo.values(), ignore_index=True)
 
-    VOCABULARIO = list(vocab_treino)
-
-    # ── Amostra fixa (500 imagens, random_state=42) ──
-    TAMANHO_AMOSTRA = 500
-    df_amostra = df_test.sample(
-        n=min(TAMANHO_AMOSTRA, len(df_test)), random_state=42
-    ).reset_index(drop=True)
+    # ── Amostra geral estratificada por tipo (500 imagens, random_state=42) ──
+    _TAMANHO_AMOSTRA_POR_TIPO = {"palavras": 200, "frases": 200, "textos": 100}
+    _amostras = []
+    for tipo, df_tipo in _dfs_por_tipo.items():
+        n = min(_TAMANHO_AMOSTRA_POR_TIPO.get(tipo, 0), len(df_tipo))
+        if n > 0:
+            _amostras.append(df_tipo.sample(n=n, random_state=42))
+    if _amostras:
+        df_amostra = (
+            pd.concat(_amostras, ignore_index=True)
+            .sample(frac=1, random_state=42)
+            .reset_index(drop=True)
+        )
+    else:
+        df_amostra = pd.DataFrame(columns=["Tipo", "Images", "Text"])
 
     # ── Resumo ──
+    _linhas_resumo = []
+    for tipo, df_tipo in _dfs_por_tipo.items():
+        n_amostra = int((df_amostra["Tipo"] == tipo).sum())
+        _linhas_resumo.append(
+            f"| {tipo.capitalize()} | **{len(df_tipo):,}** | **{n_amostra:,}** |"
+        )
+
+    _resumo_linhas = "\n".join(_linhas_resumo)
     mo.md(f"""
     **Dataset BRESSAY carregado com sucesso**
 
-    | Conjunto | Quantidade |
-    |---|---|
-    | Amostra de teste | **{len(df_amostra):,}** imagens |
-    | Vocabulário de treino | **{len(VOCABULARIO):,}** palavras únicas |
-    | Total teste (words) | **{len(df_test):,}** imagens |
-    | Páginas de teste | **{len(paginas_teste):,}** |
+    | Nível | Total no teste | Amostra usada |
+    |---|---|---|
+    {_resumo_linhas}
+    | **Geral** | **{len(_df_test):,}** | **{len(df_amostra):,}** |
+    | Páginas de teste | **{len(_paginas_teste):,}** | — |
     """)
-    return DIRETORIO_WORDS, VOCABULARIO, df_amostra
+    return df_amostra
 
 
 @app.cell(hide_code=True)
-def _(DIRETORIO_WORDS, df_amostra, mo, os):
+def _(df_amostra, mo, os):
     mo.md("### Exemplos do dataset")
 
     _imagens_exemplos = []
-    qtd_amostras = 16
-    amostra_exemplos = df_amostra.head(qtd_amostras)
-    for i in range(0, qtd_amostras, 4):
-        cells = []
-        for j in range(i, min(i + 4, qtd_amostras)):
-            row = amostra_exemplos.iloc[j]
-            caminho_img = os.path.join(DIRETORIO_WORDS, str(row["Images"]))
-            if os.path.exists(caminho_img):
-                cells.append(
-                    mo.image(caminho_img, width=120, caption=str(row["Text"]))
+    _qtd_amostras = 16
+    _amostra_exemplos = df_amostra.head(_qtd_amostras)
+    for i in range(0, _qtd_amostras, 4):
+        _cells = []
+        for j in range(i, min(i + 4, _qtd_amostras)):
+            row = _amostra_exemplos.iloc[j]
+            _caminho_exemplo = str(row["Images"])
+            if os.path.exists(_caminho_exemplo):
+                _cells.append(
+                    mo.image(
+                        _caminho_exemplo,
+                        width=120,
+                        caption=f"{row['Tipo']}: {row['Text']}",
+                    )
                 )
-        if cells:
-            _imagens_exemplos.append(mo.hstack(cells, gap=0.5))
+        if _cells:
+            _imagens_exemplos.append(mo.hstack(_cells, gap=0.5))
     mo.vstack(_imagens_exemplos)
     return
 
@@ -394,36 +427,6 @@ def _(Levenshtein, jiwer):
 
 
 @app.cell(hide_code=True)
-def _(Levenshtein, normalizar):
-    def corrigir_fuzzy(
-        texto_ocr: str, vocabulario: list[str], score_minimo: float = 0.0
-    ) -> str:
-        """
-        Corrige texto via fuzzy matching contra um vocabulário conhecido.
-        """
-        texto_ocr = normalizar(texto_ocr)
-        texto_ocr = "".join(
-            c for c in texto_ocr if c.isalnum() or c.isspace()
-        ).strip()
-
-        if len(texto_ocr) < 2 or not vocabulario:
-            return texto_ocr
-
-        melhor_termo = texto_ocr
-        melhor_score = 0.0
-
-        for termo in vocabulario:
-            score = Levenshtein.ratio(texto_ocr, normalizar(termo))
-            if score > melhor_score:
-                melhor_score = score
-                melhor_termo = normalizar(termo)
-
-        return melhor_termo if melhor_score >= score_minimo else texto_ocr
-
-    return (corrigir_fuzzy,)
-
-
-@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     # 8 Carregando os Modelos
@@ -447,7 +450,7 @@ def _(mo, torch):
     gpu_disponivel = torch.cuda.is_available()
     if gpu_disponivel:
         _nome_gpu = torch.cuda.get_device_name(0)
-        _vram_total = torch.cuda.get_device_properties(0).total_mem / 1024**3
+        _vram_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
         mo.md(
             f"✅ **GPU detectada:** {_nome_gpu} ({_vram_total:.1f} GB VRAM total)"
         )
@@ -474,7 +477,7 @@ def _(PaddleOCR, gpu_disponivel, mo):
         use_textline_orientation=False,
         engine="transformers",
         device="cpu",
-        lang="en",
+        lang="pt",
     )
 
     if gpu_disponivel:
@@ -485,7 +488,7 @@ def _(PaddleOCR, gpu_disponivel, mo):
             use_textline_orientation=False,
             engine="transformers",
             device="gpu",
-            lang="en",
+            lang="pt",
         )
 
     _status_gpu = "✅ GPU" if ocr_paddle_gpu is not None else "❌ Indisponível"
@@ -653,7 +656,7 @@ def _(Image, cv2, normalizar, os, psutil, time, torch):
                 images=image, return_tensors="pt"
             ).pixel_values
             pixel_values = pixel_values.to(model.device)
-            generated_ids = model.generate(pixel_values, max_new_tokens=64)
+            generated_ids = model.generate(pixel_values, max_new_tokens=256)
             text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
             elapsed = time.time() - start
@@ -721,9 +724,10 @@ def _(Image, cv2, normalizar, os, psutil, time, torch):
                         {
                             "type": "text",
                             "text": (
-                                "Transcreva fielmente a palavra manuscrita nesta imagem. "
-                                "É uma redação em português brasileiro. "
-                                "Retorne apenas o texto transcrito, sem explicações."
+                                "Transcreva fielmente o texto manuscrito nesta imagem. "
+                                "É uma redação em português brasileiro (pode ser uma "
+                                "palavra, uma frase ou um parágrafo). Retorne apenas o "
+                                "texto transcrito, sem explicações."
                             ),
                         },
                     ],
@@ -737,7 +741,7 @@ def _(Image, cv2, normalizar, os, psutil, time, torch):
                 return_tensors="pt",
             ).to(model.device)
 
-            outputs = model.generate(**inputs, max_new_tokens=64)
+            outputs = model.generate(**inputs, max_new_tokens=256)
             text = processor.decode(
                 outputs[0][inputs["input_ids"].shape[-1] :],
                 skip_special_tokens=True,
@@ -766,10 +770,8 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(calcular_metricas, corrigir_fuzzy, normalizar, os, pd):
-    def rodar_benchmark_ocr(
-        nome, predizer, score_minimo, csv_saida, df, diretorio, vocabulario
-    ):
+def _(calcular_metricas, normalizar, os, pd):
+    def rodar_benchmark_ocr(nome, predizer, csv_saida, df):
         """Roda benchmark para um único motor OCR e salva CSV."""
         resultados = []
         total = len(df)
@@ -777,41 +779,30 @@ def _(calcular_metricas, corrigir_fuzzy, normalizar, os, pd):
 
         for idx, linha in df.iterrows():
             gabarito = normalizar(linha["Text"])
-            caminho = os.path.join(diretorio, str(linha["Images"]))
+            caminho = str(linha["Images"])
 
             if not os.path.exists(caminho):
                 continue
 
-            pred_raw, tempo, vram_mb, ram_mb = predizer(caminho)
-            pred_raw = normalizar(pred_raw)
-            pred_fuzzy = corrigir_fuzzy(
-                pred_raw, vocabulario, score_minimo=score_minimo
-            )
-            pred_fuzzy = normalizar(pred_fuzzy)
+            predicao, tempo, vram_mb, ram_mb = predizer(caminho)
+            predicao = normalizar(predicao)
 
-            lev_d, lev_r, cer, wer, acc, acc80 = calcular_metricas(gabarito, pred_raw)
-            lev_df, lev_rf, cer_f, wer_f, acc_f, acc80_f = calcular_metricas(
-                gabarito, pred_fuzzy
+            lev_d, lev_r, cer, wer, acc, acc80 = calcular_metricas(
+                gabarito, predicao
             )
 
             resultados.append(
                 {
+                    "Tipo": linha.get("Tipo", "geral"),
                     "Arquivo": os.path.basename(caminho),
                     "Gabarito": gabarito,
-                    "Predicao_Raw": pred_raw,
-                    "Predicao_Fuzzy": pred_fuzzy,
-                    "Levenshtein_Raw": lev_d,
-                    "Levenshtein_Fuzzy": lev_df,
-                    "Similaridade_Raw": lev_r,
-                    "Similaridade_Fuzzy": lev_rf,
-                    "CER_Raw": cer,
-                    "CER_Fuzzy": cer_f,
-                    "WER_Raw": wer,
-                    "WER_Fuzzy": wer_f,
-                    "Accuracy_Raw": acc,
-                    "Accuracy80_Raw": acc80,
-                    "Accuracy_Fuzzy": acc_f,
-                    "Accuracy80_Fuzzy": acc80_f,
+                    "Predicao": predicao,
+                    "Levenshtein": lev_d,
+                    "Similaridade": lev_r,
+                    "CER": cer,
+                    "WER": wer,
+                    "Accuracy": acc,
+                    "Accuracy80": acc80,
                     "Tempo_Inferencia": tempo,
                     "VRAM_Pico_MB": vram_mb,
                     "RAM_Pico_MB": ram_mb,
@@ -839,8 +830,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    DIRETORIO_WORDS,
-    VOCABULARIO,
     df_amostra,
     gpu_disponivel,
     mo,
@@ -850,17 +839,14 @@ def _(
     rodar_benchmark_ocr,
 ):
     if gpu_disponivel and ocr_paddle_gpu is not None:
-        NOME_CSV = "resultados_paddle_gpu_bressay.csv"
+        _NOME_CSV = "resultados_paddle_gpu_bressay.csv"
         df_paddle_gpu = rodar_benchmark_ocr(
             nome="PaddleOCR-GPU",
             predizer=partial(predizer_paddle, ocr=ocr_paddle_gpu),
-            score_minimo=0.1,
-            csv_saida=NOME_CSV,
+            csv_saida=_NOME_CSV,
             df=df_amostra,
-            diretorio=DIRETORIO_WORDS,
-            vocabulario=VOCABULARIO,
         )
-        mo.md(f"PaddleOCR GPU: **{len(df_paddle_gpu)}** amostras → `{NOME_CSV}`")
+        mo.md(f"PaddleOCR GPU: **{len(df_paddle_gpu)}** amostras → `{_NOME_CSV}`")
     else:
         df_paddle_gpu = None
         mo.md("⚠️ GPU indisponível. Pule esta célula.")
@@ -877,8 +863,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    DIRETORIO_WORDS,
-    VOCABULARIO,
     df_amostra,
     mo,
     ocr_paddle_cpu,
@@ -886,17 +870,14 @@ def _(
     predizer_paddle,
     rodar_benchmark_ocr,
 ):
-    NOME_CSV = "resultados_paddle_cpu_bressay.csv"
+    _NOME_CSV = "resultados_paddle_cpu_bressay.csv"
     df_paddle_cpu = rodar_benchmark_ocr(
         nome="PaddleOCR-CPU",
         predizer=partial(predizer_paddle, ocr=ocr_paddle_cpu),
-        score_minimo=0.1,
-        csv_saida=NOME_CSV,
+        csv_saida=_NOME_CSV,
         df=df_amostra,
-        diretorio=DIRETORIO_WORDS,
-        vocabulario=VOCABULARIO,
     )
-    mo.md(f"PaddleOCR CPU: **{len(df_paddle_cpu)}** amostras → `{NOME_CSV}`")
+    mo.md(f"PaddleOCR CPU: **{len(df_paddle_cpu)}** amostras → `{_NOME_CSV}`")
     return
 
 
@@ -910,8 +891,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    DIRETORIO_WORDS,
-    VOCABULARIO,
     df_amostra,
     gpu_disponivel,
     image_processor_trocr_gpu,
@@ -923,7 +902,7 @@ def _(
     tokenizer_trocr_gpu,
 ):
     if gpu_disponivel and model_trocr_gpu is not None:
-        NOME_CSV = "resultados_trocr_gpu_bressay.csv"
+        _NOME_CSV = "resultados_trocr_gpu_bressay.csv"
         df_trocr_gpu = rodar_benchmark_ocr(
             nome="TrOCR-GPU",
             predizer=partial(
@@ -932,13 +911,10 @@ def _(
                 tokenizer=tokenizer_trocr_gpu,
                 model=model_trocr_gpu,
             ),
-            score_minimo=0.1,
-            csv_saida=NOME_CSV,
+            csv_saida=_NOME_CSV,
             df=df_amostra,
-            diretorio=DIRETORIO_WORDS,
-            vocabulario=VOCABULARIO,
         )
-        mo.md(f"TrOCR GPU: **{len(df_trocr_gpu)}** amostras → `{NOME_CSV}`")
+        mo.md(f"TrOCR GPU: **{len(df_trocr_gpu)}** amostras → `{_NOME_CSV}`")
     else:
         df_trocr_gpu = None
         mo.md("⚠️ GPU indisponível. Pule esta célula.")
@@ -955,8 +931,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    DIRETORIO_WORDS,
-    VOCABULARIO,
     df_amostra,
     image_processor_trocr_cpu,
     mo,
@@ -966,7 +940,7 @@ def _(
     rodar_benchmark_ocr,
     tokenizer_trocr_cpu,
 ):
-    NOME_CSV = "resultados_trocr_cpu_bressay.csv"
+    _NOME_CSV = "resultados_trocr_cpu_bressay.csv"
     df_trocr_cpu = rodar_benchmark_ocr(
         nome="TrOCR-CPU",
         predizer=partial(
@@ -975,13 +949,10 @@ def _(
             tokenizer=tokenizer_trocr_cpu,
             model=model_trocr_cpu,
         ),
-        score_minimo=0.1,
-        csv_saida=NOME_CSV,
+        csv_saida=_NOME_CSV,
         df=df_amostra,
-        diretorio=DIRETORIO_WORDS,
-        vocabulario=VOCABULARIO,
     )
-    mo.md(f"TrOCR CPU: **{len(df_trocr_cpu)}** amostras → `{NOME_CSV}`")
+    mo.md(f"TrOCR CPU: **{len(df_trocr_cpu)}** amostras → `{_NOME_CSV}`")
     return
 
 
@@ -995,8 +966,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    DIRETORIO_WORDS,
-    VOCABULARIO,
     df_amostra,
     gpu_disponivel,
     mo,
@@ -1007,7 +976,7 @@ def _(
     rodar_benchmark_ocr,
 ):
     if gpu_disponivel and model_qwen_gpu is not None:
-        NOME_CSV = "resultados_qwen_gpu_bressay.csv"
+        _NOME_CSV = "resultados_qwen_gpu_bressay.csv"
         df_qwen_gpu = rodar_benchmark_ocr(
             nome="Qwen3-VL-GPU",
             predizer=partial(
@@ -1015,13 +984,10 @@ def _(
                 processor=processor_qwen_gpu,
                 model=model_qwen_gpu,
             ),
-            score_minimo=0.1,
-            csv_saida=NOME_CSV,
+            csv_saida=_NOME_CSV,
             df=df_amostra,
-            diretorio=DIRETORIO_WORDS,
-            vocabulario=VOCABULARIO,
         )
-        mo.md(f"Qwen3-VL GPU: **{len(df_qwen_gpu)}** amostras → `{NOME_CSV}`")
+        mo.md(f"Qwen3-VL GPU: **{len(df_qwen_gpu)}** amostras → `{_NOME_CSV}`")
     else:
         df_qwen_gpu = None
         mo.md("⚠️ GPU indisponível. Pule esta célula.")
@@ -1041,8 +1007,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    DIRETORIO_WORDS,
-    VOCABULARIO,
     df_amostra,
     mo,
     model_qwen_cpu,
@@ -1051,7 +1015,7 @@ def _(
     processor_qwen_cpu,
     rodar_benchmark_ocr,
 ):
-    NOME_CSV = "resultados_qwen_cpu_bressay.csv"
+    _NOME_CSV = "resultados_qwen_cpu_bressay.csv"
     df_qwen_cpu = rodar_benchmark_ocr(
         nome="Qwen3-VL-CPU",
         predizer=partial(
@@ -1059,13 +1023,10 @@ def _(
             processor=processor_qwen_cpu,
             model=model_qwen_cpu,
         ),
-        score_minimo=0.1,
-        csv_saida=NOME_CSV,
+        csv_saida=_NOME_CSV,
         df=df_amostra,
-        diretorio=DIRETORIO_WORDS,
-        vocabulario=VOCABULARIO,
     )
-    mo.md(f"Qwen3-VL CPU: **{len(df_qwen_cpu)}** amostras → `{NOME_CSV}`")
+    mo.md(f"Qwen3-VL CPU: **{len(df_qwen_cpu)}** amostras → `{_NOME_CSV}`")
     return
 
 
@@ -1105,11 +1066,30 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(CSVS_RESULTADO, mo, os, pd):
+    def _normalizar_resultado(df):
+        """Garante colunas do novo formato e adiciona o nível (Tipo) quando ausente."""
+        df = df.copy()
+        if "Tipo" not in df.columns:
+            df["Tipo"] = "palavras"
+        renomear = {
+            "Predicao_Raw": "Predicao",
+            "Levenshtein_Raw": "Levenshtein",
+            "Similaridade_Raw": "Similaridade",
+            "CER_Raw": "CER",
+            "WER_Raw": "WER",
+            "Accuracy_Raw": "Accuracy",
+            "Accuracy80_Raw": "Accuracy80",
+        }
+        df = df.rename(columns={k: v for k, v in renomear.items() if k in df.columns})
+        colunas_fuzzy = [c for c in df.columns if "Fuzzy" in c]
+        if colunas_fuzzy:
+            df = df.drop(columns=colunas_fuzzy)
+        return df
+
     dfs_disponiveis = {}
     for _nome, _csv in CSVS_RESULTADO:
         if os.path.exists(_csv):
-            _df = pd.read_csv(_csv)
-            dfs_disponiveis[_nome] = _df
+            dfs_disponiveis[_nome] = _normalizar_resultado(pd.read_csv(_csv))
 
     if not dfs_disponiveis:
         mo.md(
@@ -1120,7 +1100,7 @@ def _(CSVS_RESULTADO, mo, os, pd):
         for _nome, _df in dfs_disponiveis.items():
             mo.md(f"### {_nome}")
             mo.ui.table(
-                _df[["Arquivo", "Gabarito", "Predicao_Raw", "Predicao_Fuzzy"]].head(5)
+                _df[["Tipo", "Arquivo", "Gabarito", "Predicao"]].head(5)
             )
     return (dfs_disponiveis,)
 
@@ -1148,22 +1128,20 @@ def _(dfs_disponiveis, mo, pd):
     else:
         _linhas = []
         for _nome, _df in dfs_disponiveis.items():
-            for variante in ("Raw", "Fuzzy"):
-                _linhas.append(
-                    {
-                        "Motor": _nome,
-                        "Variante": variante,
-                        "Word Acc (%)": fmt_pct(_df[f"Accuracy_{variante}"].mean()),
-                        "Acc @80% (%)": fmt_pct(_df[f"Accuracy80_{variante}"].mean()),
-                        "Lev Médio": fmt_abs(_df[f"Levenshtein_{variante}"].mean()),
-                        "CER (%)": fmt_pct(_df[f"CER_{variante}"].mean()),
-                        "WER (%)": fmt_pct(_df[f"WER_{variante}"].mean()),
-                    }
-                )
+            _linhas.append(
+                {
+                    "Motor": _nome,
+                    "Word Acc (%)": fmt_pct(_df["Accuracy"].mean()),
+                    "Acc @80% (%)": fmt_pct(_df["Accuracy80"].mean()),
+                    "Lev Médio": fmt_abs(_df["Levenshtein"].mean()),
+                    "CER (%)": fmt_pct(_df["CER"].mean()),
+                    "WER (%)": fmt_pct(_df["WER"].mean()),
+                }
+            )
 
         df_painel = pd.DataFrame(_linhas)
-        resultado = mo.ui.table(data=df_painel, pagination=True)
-    resultado
+        _resultado = mo.ui.table(data=df_painel, pagination=True)
+    _resultado
     return
 
 
@@ -1200,8 +1178,8 @@ def _(dfs_disponiveis, mo, pd):
             )
 
         df_eff = pd.DataFrame(_linhas_eff)
-        resultado = mo.ui.table(data=df_eff, pagination=True)
-    resultado
+        _resultado = mo.ui.table(data=df_eff, pagination=True)
+    _resultado
     return
 
 
@@ -1266,10 +1244,49 @@ def _(dfs_disponiveis, mo, pd):
 
         if _linhas_speedup:
             df_speedup = pd.DataFrame(_linhas_speedup)
-            resultado = mo.ui.table(data=df_speedup, pagination=True)
+            _resultado = mo.ui.table(data=df_speedup, pagination=True)
         else:
-            resultado = mo.md("⚠️ Dados insuficientes para comparar GPU vs CPU.")
-    resultado
+            _resultado = mo.md("⚠️ Dados insuficientes para comparar GPU vs CPU.")
+    _resultado
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 10.5 Painel Comparativo por Nível (Palavras / Frases / Textos)
+
+    Mesmas métricas de acurácia, separadas por nível de segmentação do BRESSAY.
+    Útil para comparar, por exemplo, o desempenho de um modelo em **palavras
+    isoladas** vs **frases** vs **textos completos**.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(dfs_disponiveis, mo, pd):
+    if not dfs_disponiveis:
+        _resultado = mo.md("⚠️ Nenhum dado para comparar.")
+    else:
+        _linhas = []
+        for _nome, _df in dfs_disponiveis.items():
+            for _tipo, _sub in _df.groupby("Tipo"):
+                _linhas.append(
+                    {
+                        "Motor": _nome,
+                        "Nível": _tipo,
+                        "N": len(_sub),
+                        "Word Acc (%)": round(_sub["Accuracy"].mean() * 100, 2),
+                        "Acc @80% (%)": round(_sub["Accuracy80"].mean() * 100, 2),
+                        "Lev Médio": round(_sub["Levenshtein"].mean(), 2),
+                        "CER (%)": round(_sub["CER"].mean() * 100, 2),
+                        "WER (%)": round(_sub["WER"].mean() * 100, 2),
+                    }
+                )
+
+        df_painel_tipo = pd.DataFrame(_linhas)
+        _resultado = mo.ui.table(data=df_painel_tipo, pagination=True)
+    _resultado
     return
 
 
@@ -1278,8 +1295,8 @@ def _(mo):
     mo.md(r"""
     # 11 Resultados (Gráficos)
 
-    Gráficos comparando Raw vs Fuzzy para cada motor. Detecta automaticamente
-    os CSVs disponíveis na pasta.
+    Gráficos comparando os motores de OCR. Detecta automaticamente os CSVs
+    disponíveis na pasta.
     """)
     return
 
@@ -1293,80 +1310,50 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
-    _nomes = []
-    _raw_acc = []
-    _fuzzy_acc = []
-    _raw_acc80 = []
-    _fuzzy_acc80 = []
+def _(dfs_disponiveis, go, make_subplots, mo):
+    _nomes = list(dfs_disponiveis.keys())
+    _acc = [dfs_disponiveis[n]["Accuracy"].mean() * 100 for n in _nomes]
+    _acc80 = [dfs_disponiveis[n]["Accuracy80"].mean() * 100 for n in _nomes]
 
-    for _nome, _csv in CSVS_RESULTADO:
-        if os.path.exists(_csv):
-            _df = pd.read_csv(_csv)
-            _nomes.append(_nome)
-            _raw_acc.append(_df["Accuracy_Raw"].mean() * 100)
-            _fuzzy_acc.append(_df["Accuracy_Fuzzy"].mean() * 100)
-            _raw_acc80.append(_df["Accuracy80_Raw"].mean() * 100)
-            _fuzzy_acc80.append(_df["Accuracy80_Fuzzy"].mean() * 100)
+    if not _nomes:
+        _resultado = mo.md("⚠️ Nenhum dado para comparar.")
+    else:
+        _fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=("Word Accuracy", "Word Accuracy @80%"),
+        )
 
-    _fig = make_subplots(
-        rows=1, cols=2,
-        subplot_titles=("Word Accuracy", "Word Accuracy @80%"),
-    )
+        _fig.add_trace(
+            go.Bar(
+                name="Word Accuracy", x=_nomes, y=_acc,
+                text=[f"{v:.1f}" for v in _acc], textposition="outside",
+                marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
+                hovertemplate="<b>%{x}</b><br>Word Acc: %{y:.1f}%<extra></extra>",
+                showlegend=False,
+            ),
+            row=1, col=1,
+        )
+        _fig.add_trace(
+            go.Bar(
+                name="Acc @80%", x=_nomes, y=_acc80,
+                text=[f"{v:.1f}" for v in _acc80], textposition="outside",
+                marker_color="#55A868", marker_line=dict(color="white", width=0.8),
+                hovertemplate="<b>%{x}</b><br>Acc @80%: %{y:.1f}%<extra></extra>",
+                showlegend=False,
+            ),
+            row=1, col=2,
+        )
 
-    _fig.add_trace(
-        go.Bar(
-            name="Raw", x=_nomes, y=_raw_acc,
-            text=[f"{v:.1f}" for v in _raw_acc], textposition="outside",
-            marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
-            hovertemplate="<b>%{x}</b><br>Raw: %{y:.1f}%<extra></extra>",
-        ),
-        row=1, col=1,
-    )
-    _fig.add_trace(
-        go.Bar(
-            name="Fuzzy", x=_nomes, y=_fuzzy_acc,
-            text=[f"{v:.1f}" for v in _fuzzy_acc], textposition="outside",
-            marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
-            hovertemplate="<b>%{x}</b><br>Fuzzy: %{y:.1f}%<extra></extra>",
-        ),
-        row=1, col=1,
-    )
+        _fig.update_layout(
+            barmode="group",
+            template="plotly_white",
+            height=420,
+            margin=dict(l=20, r=20, t=50, b=80),
+        )
+        _fig.update_yaxes(range=[0, 110], title="%", row=1, col=1)
+        _fig.update_yaxes(range=[0, 110], title="%", row=1, col=2)
 
-    _fig.add_trace(
-        go.Bar(
-            name="Raw", x=_nomes, y=_raw_acc80,
-            text=[f"{v:.1f}" for v in _raw_acc80], textposition="outside",
-            marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
-            hovertemplate="<b>%{x}</b><br>Raw: %{y:.1f}%<extra></extra>",
-            showlegend=False,
-        ),
-        row=1, col=2,
-    )
-    _fig.add_trace(
-        go.Bar(
-            name="Fuzzy", x=_nomes, y=_fuzzy_acc80,
-            text=[f"{v:.1f}" for v in _fuzzy_acc80], textposition="outside",
-            marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
-            hovertemplate="<b>%{x}</b><br>Fuzzy: %{y:.1f}%<extra></extra>",
-            showlegend=False,
-        ),
-        row=1, col=2,
-    )
-
-    _fig.update_layout(
-        barmode="group",
-        template="plotly_white",
-        height=420,
-        margin=dict(l=20, r=20, t=50, b=80),
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-        ),
-    )
-    _fig.update_yaxes(range=[0, 110], title="%", row=1, col=1)
-    _fig.update_yaxes(range=[0, 110], title="%", row=1, col=2)
-
-    _resultado = mo.ui.plotly(_fig)
+        _resultado = mo.ui.plotly(_fig)
     _resultado
     return
 
@@ -1380,23 +1367,14 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
-    _nomes = []
-    _raw_lev = []
-    _fuzzy_lev = []
-    _raw_cer = []
-    _fuzzy_cer = []
+def _(dfs_disponiveis, go, make_subplots, mo):
+    _nomes = list(dfs_disponiveis.keys())
+    _lev = [dfs_disponiveis[n]["Levenshtein"].mean() for n in _nomes]
+    _cer = [dfs_disponiveis[n]["CER"].mean() * 100 for n in _nomes]
 
-    for _nome, _csv in CSVS_RESULTADO:
-        if os.path.exists(_csv):
-            _df = pd.read_csv(_csv)
-            _nomes.append(_nome)
-            _raw_lev.append(_df["Levenshtein_Raw"].mean())
-            _fuzzy_lev.append(_df["Levenshtein_Fuzzy"].mean())
-            _raw_cer.append(_df["CER_Raw"].mean() * 100)
-            _fuzzy_cer.append(_df["CER_Fuzzy"].mean() * 100)
-
-    if _nomes:
+    if not _nomes:
+        _resultado = mo.md("⚠️ Nenhum dado para comparar.")
+    else:
         _fig = make_subplots(
             rows=1, cols=2,
             subplot_titles=(
@@ -1407,39 +1385,20 @@ def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
 
         _fig.add_trace(
             go.Bar(
-                name="Raw", x=_nomes, y=_raw_lev,
-                text=[f"{v:.1f}" for v in _raw_lev], textposition="outside",
+                name="Levenshtein", x=_nomes, y=_lev,
+                text=[f"{v:.1f}" for v in _lev], textposition="outside",
                 marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
-                hovertemplate="<b>%{x}</b><br>Raw: %{y:.2f}<extra></extra>",
-            ),
-            row=1, col=1,
-        )
-        _fig.add_trace(
-            go.Bar(
-                name="Fuzzy", x=_nomes, y=_fuzzy_lev,
-                text=[f"{v:.1f}" for v in _fuzzy_lev], textposition="outside",
-                marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
-                hovertemplate="<b>%{x}</b><br>Fuzzy: %{y:.2f}<extra></extra>",
-            ),
-            row=1, col=1,
-        )
-
-        _fig.add_trace(
-            go.Bar(
-                name="Raw", x=_nomes, y=_raw_cer,
-                text=[f"{v:.1f}" for v in _raw_cer], textposition="outside",
-                marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
-                hovertemplate="<b>%{x}</b><br>Raw: %{y:.1f}%<extra></extra>",
+                hovertemplate="<b>%{x}</b><br>Lev: %{y:.2f}<extra></extra>",
                 showlegend=False,
             ),
-            row=1, col=2,
+            row=1, col=1,
         )
         _fig.add_trace(
             go.Bar(
-                name="Fuzzy", x=_nomes, y=_fuzzy_cer,
-                text=[f"{v:.1f}" for v in _fuzzy_cer], textposition="outside",
+                name="CER", x=_nomes, y=_cer,
+                text=[f"{v:.1f}" for v in _cer], textposition="outside",
                 marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
-                hovertemplate="<b>%{x}</b><br>Fuzzy: %{y:.1f}%<extra></extra>",
+                hovertemplate="<b>%{x}</b><br>CER: %{y:.1f}%<extra></extra>",
                 showlegend=False,
             ),
             row=1, col=2,
@@ -1450,15 +1409,11 @@ def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
             template="plotly_white",
             height=420,
             margin=dict(l=20, r=20, t=50, b=80),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
         )
         _fig.update_yaxes(title="Distância", row=1, col=1)
         _fig.update_yaxes(title="%", row=1, col=2)
 
         _resultado = mo.ui.plotly(_fig)
-
     _resultado
     return
 
@@ -1616,35 +1571,21 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, go, mo, os, pd):
-    _nomes = []
-    _raw_wer = []
-    _fuzzy_wer = []
+def _(dfs_disponiveis, go, mo):
+    _nomes = list(dfs_disponiveis.keys())
+    _wer = [dfs_disponiveis[n]["WER"].mean() * 100 for n in _nomes]
 
-    for _nome, _csv in CSVS_RESULTADO:
-        if os.path.exists(_csv):
-            _df = pd.read_csv(_csv)
-            _nomes.append(_nome)
-            _raw_wer.append(_df["WER_Raw"].mean() * 100)
-            _fuzzy_wer.append(_df["WER_Fuzzy"].mean() * 100)
-
-    if _nomes:
+    if not _nomes:
+        _resultado = mo.md("⚠️ Nenhum dado para comparar.")
+    else:
         _fig = go.Figure()
 
         _fig.add_trace(
             go.Bar(
-                name="Raw", x=_nomes, y=_raw_wer,
-                text=[f"{v:.1f}" for v in _raw_wer], textposition="outside",
+                x=_nomes, y=_wer,
+                text=[f"{v:.1f}" for v in _wer], textposition="outside",
                 marker_color="#4C72B0", marker_line=dict(color="white", width=0.8),
-                hovertemplate="<b>%{x}</b><br>Raw WER: %{y:.1f}%<extra></extra>",
-            )
-        )
-        _fig.add_trace(
-            go.Bar(
-                name="Fuzzy", x=_nomes, y=_fuzzy_wer,
-                text=[f"{v:.1f}" for v in _fuzzy_wer], textposition="outside",
-                marker_color="#DD8452", marker_line=dict(color="white", width=0.8),
-                hovertemplate="<b>%{x}</b><br>Fuzzy WER: %{y:.1f}%<extra></extra>",
+                hovertemplate="<b>%{x}</b><br>WER: %{y:.1f}%<extra></extra>",
             )
         )
 
@@ -1653,13 +1594,10 @@ def _(CSVS_RESULTADO, go, mo, os, pd):
                 text="WER — Word Error Rate (menor = melhor)", font=dict(size=15)
             ),
             yaxis=dict(title="%", gridcolor="rgba(0,0,0,0.1)"),
-            barmode="group",
             template="plotly_white",
             height=430,
             margin=dict(l=20, r=20, t=50, b=80),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
-            ),
+            showlegend=False,
         )
 
         _resultado = mo.ui.plotly(_fig)
@@ -1672,35 +1610,35 @@ def _(mo):
     mo.md(r"""
     ## 11.6 Heatmap de Métricas
 
-    Visão panorâmica de todos os modelos × métricas de acurácia (variante Raw).
+    Visão panorâmica de todos os modelos × métricas de acurácia.
     Verde = melhor, vermelho = pior.
     """)
     return
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, go, mo, np, os, pd):
-    _nomes = []
+def _(dfs_disponiveis, go, mo, np):
+    _nomes = list(dfs_disponiveis.keys())
     _metricas_data = []
 
-    for _nome, _csv in CSVS_RESULTADO:
-        if os.path.exists(_csv):
-            _df = pd.read_csv(_csv)
-            _nomes.append(_nome)
-            _metricas_data.append(
-                {
-                    "Word Acc (%)": _df["Accuracy_Raw"].mean() * 100,
-                    "Acc @80% (%)": _df["Accuracy80_Raw"].mean() * 100,
-                    "Similaridade": _df["Similaridade_Raw"].mean() * 100,
-                    "CER (%)": _df["CER_Raw"].mean() * 100,
-                    "WER (%)": _df["WER_Raw"].mean() * 100,
-                    "Lev. Médio": _df["Levenshtein_Raw"].mean(),
-                    "Tempo (s)": _df["Tempo_Inferencia"].mean(),
-                    "VRAM (MB)": _df["VRAM_Pico_MB"].mean(),
-                }
-            )
+    for _nome in _nomes:
+        _df = dfs_disponiveis[_nome]
+        _metricas_data.append(
+            {
+                "Word Acc (%)": _df["Accuracy"].mean() * 100,
+                "Acc @80% (%)": _df["Accuracy80"].mean() * 100,
+                "Similaridade": _df["Similaridade"].mean() * 100,
+                "CER (%)": _df["CER"].mean() * 100,
+                "WER (%)": _df["WER"].mean() * 100,
+                "Lev. Médio": _df["Levenshtein"].mean(),
+                "Tempo (s)": _df["Tempo_Inferencia"].mean(),
+                "VRAM (MB)": _df["VRAM_Pico_MB"].mean(),
+            }
+        )
 
-    if _nomes:
+    if not _nomes:
+        _resultado = mo.md("⚠️ Nenhum dado para comparar.")
+    else:
         _metricas_nomes = [
             "Word Acc (%)",
             "Acc @80% (%)",
@@ -1779,7 +1717,7 @@ def _(CSVS_RESULTADO, go, mo, np, os, pd):
 
         _fig.update_layout(
             title=dict(
-                text="Heatmap de Métricas — Raw (verde = melhor, vermelho = pior)",
+                text="Heatmap de Métricas (verde = melhor, vermelho = pior)",
                 font=dict(size=15),
             ),
             xaxis=dict(title="Métrica", side="bottom", tickangle=45, tickfont=dict(size=10)),
@@ -1807,52 +1745,36 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
-    _nomes = []
-    _dataframes = []
+def _(dfs_disponiveis, go, mo):
+    _nomes = list(dfs_disponiveis.keys())
 
-    for _nome, _csv in CSVS_RESULTADO:
-        if os.path.exists(_csv):
-            _df = pd.read_csv(_csv)
-            _nomes.append(_nome)
-            _dataframes.append(_df)
-
-    if _nomes:
+    if not _nomes:
+        _resultado = mo.md("⚠️ Nenhum dado para comparar.")
+    else:
         _faixas = [(1, 3), (4, 6), (7, 9), (10, 12), (13, 20)]
         _rotulos = [f"{a}-{b}" for a, b in _faixas]
 
-        _fig = make_subplots(
-            rows=1, cols=2,
-            subplot_titles=(
-                "Word Accuracy por Comprimento — Raw",
-                "Word Accuracy por Comprimento — Fuzzy",
-            ),
-        )
-
-        for _col, (_variante, _) in enumerate([("Raw", ""), ("Fuzzy", "")], 1):
-            for _idx, (_nome, _df) in enumerate(zip(_nomes, _dataframes)):
-                _accs = []
-                for _lo, _hi in _faixas:
-                    _mask = _df["Gabarito"].astype(str).str.len().between(_lo, _hi)
-                    if _mask.sum() > 0:
-                        _accs.append(
-                            _df.loc[_mask, f"Accuracy_{_variante}"].mean() * 100
-                        )
-                    else:
-                        _accs.append(0)
-
-                _fig.add_trace(
-                    go.Bar(
-                        name=_nome,
-                        x=_rotulos,
-                        y=_accs,
-                        hovertemplate=f"<b>{_nome}</b><br>{_variante}: "
-                        + "%{y:.1f}%<br>Faixa: %{x}<extra></extra>",
-                        showlegend=(_col == 1),
-                    ),
-                    row=1,
-                    col=_col,
+        _fig = go.Figure()
+        for _nome in _nomes:
+            _df = dfs_disponiveis[_nome]
+            _accs = []
+            for _lo, _hi in _faixas:
+                _mask = _df["Gabarito"].astype(str).str.len().between(_lo, _hi)
+                _accs.append(
+                    _df.loc[_mask, "Accuracy"].mean() * 100 if _mask.sum() > 0 else 0
                 )
+
+            _fig.add_trace(
+                go.Bar(
+                    name=_nome,
+                    x=_rotulos,
+                    y=_accs,
+                    hovertemplate=(
+                        f"<b>{_nome}</b><br>Word Acc: %{{y:.1f}}%<br>"
+                        "Faixa: %{x}<extra></extra>"
+                    ),
+                )
+            )
 
         _fig.update_layout(
             barmode="group",
@@ -1867,17 +1789,90 @@ def _(CSVS_RESULTADO, go, make_subplots, mo, os, pd):
                 x=0.5,
                 font=dict(size=9),
             ),
+            yaxis=dict(
+                range=[0, 110], title="Word Accuracy (%)",
+                gridcolor="rgba(0,0,0,0.1)",
+            ),
+            xaxis=dict(title="Comprimento da palavra (caracteres)"),
         )
-        _fig.update_yaxes(
-            range=[0, 110], title="Word Accuracy (%)",
-            gridcolor="rgba(0,0,0,0.1)", row=1, col=1,
+
+        _resultado = mo.ui.plotly(_fig)
+    _resultado
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 11.8 Acurácia por Nível (Palavras / Frases / Textos)
+
+    Compara a Word Accuracy de cada motor em cada nível de segmentação do
+    BRESSAY. Permite enxergar, por exemplo, se um modelo é forte em palavras
+    isoladas mas fraco em frases ou textos longos.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(dfs_disponiveis, go, mo, pd):
+    if not dfs_disponiveis:
+        _resultado = mo.md("⚠️ Nenhum dado para comparar.")
+    else:
+        _registros = []
+        for _nome, _df in dfs_disponiveis.items():
+            for _tipo, _sub in _df.groupby("Tipo"):
+                _registros.append(
+                    {
+                        "Motor": _nome,
+                        "Nível": _tipo,
+                        "Word Acc (%)": _sub["Accuracy"].mean() * 100,
+                    }
+                )
+        _df_plot = pd.DataFrame(_registros)
+        _niveis = ["palavras", "frases", "textos"]
+
+        _fig = go.Figure()
+        for _motor in _df_plot["Motor"].unique():
+            _sub = _df_plot[_df_plot["Motor"] == _motor]
+            _accs = [
+                _sub.loc[_sub["Nível"] == _nivel, "Word Acc (%)"].iloc[0]
+                if (_sub["Nível"] == _nivel).any()
+                else 0
+                for _nivel in _niveis
+            ]
+            _fig.add_trace(
+                go.Bar(
+                    name=_motor,
+                    x=_niveis,
+                    y=_accs,
+                    text=[f"{v:.1f}" for v in _accs],
+                    textposition="outside",
+                    hovertemplate=(
+                        "<b>%{x}</b><br>"
+                        f"<b>{_motor}</b><br>Word Acc: %{{y:.1f}}%<extra></extra>"
+                    ),
+                )
+            )
+
+        _fig.update_layout(
+            barmode="group",
+            template="plotly_white",
+            height=450,
+            margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+            ),
+            yaxis=dict(
+                range=[0, 110],
+                title="Word Accuracy (%)",
+                gridcolor="rgba(0,0,0,0.1)",
+            ),
+            xaxis=dict(title="Nível de segmentação"),
         )
-        _fig.update_yaxes(
-            range=[0, 110], title="Word Accuracy (%)",
-            gridcolor="rgba(0,0,0,0.1)", row=1, col=2,
-        )
-        _fig.update_xaxes(title="Comprimento da palavra (caracteres)", row=1, col=1)
-        _fig.update_xaxes(title="Comprimento da palavra (caracteres)", row=1, col=2)
 
         _resultado = mo.ui.plotly(_fig)
     _resultado
