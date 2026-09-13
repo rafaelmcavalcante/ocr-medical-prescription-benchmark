@@ -347,9 +347,11 @@ def _(CFG, Image, df_treino, df_valid, model, processor, torch):
                 "labels": labels,
             }
             if "pixel_values" in enc:
-                item["pixel_values"] = enc["pixel_values"][0]
+                # O processor já retorna [n_patches, dim] (2D, sem batch dim).
+                item["pixel_values"] = enc["pixel_values"]
             if "image_grid_thw" in enc:
-                item["image_grid_thw"] = enc["image_grid_thw"][0]
+                # O processor retorna [1, 3]; o cat do collator vira [n, 3].
+                item["image_grid_thw"] = enc["image_grid_thw"]
             if "mm_token_type_ids" in enc:
                 item["mm_token_type_ids"] = enc["mm_token_type_ids"][0][
                     : input_ids.size(0)
