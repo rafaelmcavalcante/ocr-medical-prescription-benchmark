@@ -129,9 +129,8 @@ def _(mo):
     |---|---|---|
     | **Latência** | Tempo médio de inferência por imagem | segundos (s) |
     | **Throughput** | Imagens processadas por segundo | imagens/s |
-    | **VRAM Pico** | Memória máxima alocada na GPU durante inferência | MB (apenas GPU) |
-    | **RAM Pico** | Memória máxima alocada na CPU durante inferência | MB (apenas CPU) |
-
+    | **VRAM Pico** | Pico **incremental** de memória da GPU durante a inferência (delta em relação ao baseline, para não contar o modelo residente) | MB (apenas GPU) |
+    | **RAM Pico** | Pico **incremental** de RSS do processo durante a inferência (amostrado, não apenas o valor final) | MB |
     """)
     return
 
@@ -157,8 +156,10 @@ def _():
     import torchvision
     import accelerate
     import os
+    import re
     import time
     import urllib.request
+    import threading
     import zipfile
     import cv2
     import jiwer
@@ -201,6 +202,8 @@ def _():
         partial,
         pd,
         psutil,
+        re,
+        threading,
         time,
         torch,
         urllib,
@@ -234,7 +237,7 @@ def _(mo, os, urllib, zipfile):
     if not os.path.exists(DATASET_DIR):
         zip_path = "bressay.zip"
         if not os.path.exists(zip_path):
-            mo.md("Baixando dataset BRESSAY...")
+            print("Baixando dataset BRESSAY...")
             if "drive.google.com" in DATASET_URL:
                 try:
                     import gdown
@@ -250,9 +253,10 @@ def _(mo, os, urllib, zipfile):
         # Extrai na raiz (o zip já contém a pasta bressay/ internamente)
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(".")
-        mo.md("Dataset extraído!")
+        _msg_dataset = "Dataset extraído!"
     else:
-        mo.md("Dataset BRESSAY já existe localmente.")
+        _msg_dataset = "Dataset BRESSAY já existe localmente."
+    mo.md(_msg_dataset)
     return (DATASET_DIR,)
 
 
@@ -390,15 +394,55 @@ def _(df_amostra, mo, os):
 def _(mo):
     mo.md(r"""
     # 7 Métricas e Funções Auxiliares
+
+    Antes de calcular as métricas, o gabarito é **limpo das anotações do BRESSAY**
+    (ver `limpar_anotacoes`): trechos ilegíveis (`@@???@@`) e riscados
+    (`--texto--`) são removidos, e sobrescritos/subscritos legíveis (`##texto##`)
+    têm apenas os marcadores retirados. A mesma limpeza é aplicada à predição,
+    garantindo comparação justa. Amostras cujo gabarito fica vazio após a
+    limpeza são descartadas.
     """)
     return
 
 
 @app.cell(hide_code=True)
-def _(Levenshtein, jiwer):
+def _(Levenshtein, jiwer, re):
+    # Marcadores de anotação do BRESSAY:
+    #   @@???@@ / ##@@???@@## / $$@@???@@$$      -> trecho ilegível (remover)
+    #   --texto-- / ##--texto--## / $$--texto--$$ -> riscado (remover por padrão)
+    #   ##texto## / $$texto$$                     -> sobrescrito/subscrito (manter)
+    def limpar_anotacoes(texto: str, manter_riscado: bool = False) -> str:
+        """Remove as anotações do BRESSAY, deixando apenas o texto reconhecível."""
+        t = str(texto)
+        # 1) trechos ilegíveis
+        t = re.sub(r"##@@\?\?\?@@##", " ", t)
+        t = re.sub(r"\$\$@@\?\?\?@@\$\$", " ", t)
+        t = re.sub(r"@@\?\?\?@@", " ", t)
+        # 2) trechos riscados (placeholder 'xxx' = riscado ilegível)
+        if manter_riscado:
+            t = re.sub(r"##--(.+?)--##", r"\1", t)
+            t = re.sub(r"\$\$--(.+?)--\$\$", r"\1", t)
+            t = re.sub(r"--(.+?)--", r"\1", t)
+            t = re.sub(r"\bxxx\b", " ", t, flags=re.IGNORECASE)
+        else:
+            t = re.sub(r"##--.+?--##", " ", t)
+            t = re.sub(r"\$\$--.+?--\$\$", " ", t)
+            t = re.sub(r"--.+?--", " ", t)
+        # 3) sobrescrito/subscrito legível -> mantém conteúdo, tira marcadores
+        t = re.sub(r"##([^#]+)##", r"\1", t)
+        t = re.sub(r"\$\$([^$]+)\$\$", r"\1", t)
+        # 4) marcadores órfãos (artefatos de recorte no nível de palavra)
+        t = t.replace("##", " ").replace("$$", " ")
+        t = re.sub(r"--+", " ", t)
+        return re.sub(r"\s+", " ", t).strip().lower()
+
+    # Política de avaliação: por padrão o texto riscado é descartado (o OCR não
+    # deve ser penalizado por não transcrever o que foi riscado no manuscrito).
+    MANTER_TEXTO_RISCADO = False
+
     def normalizar(texto: str) -> str:
-        """Normaliza texto: strip + lowercase."""
-        return str(texto).strip().lower()
+        """Limpa anotações do BRESSAY, normaliza espaços e caixa."""
+        return limpar_anotacoes(texto, manter_riscado=MANTER_TEXTO_RISCADO)
 
     def calcular_metricas(gabarito: str, predicao: str):
         """
@@ -451,11 +495,15 @@ def _(mo, torch):
     if gpu_disponivel:
         _nome_gpu = torch.cuda.get_device_name(0)
         _vram_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-        mo.md(
+        _msg_gpu = (
             f"✅ **GPU detectada:** {_nome_gpu} ({_vram_total:.1f} GB VRAM total)"
         )
     else:
-        mo.md("⚠️ **Nenhuma GPU detectada.** Apenas benchmarks em CPU serão executados.")
+        _msg_gpu = (
+            "⚠️ **Nenhuma GPU detectada.** "
+            "Apenas benchmarks em CPU serão executados."
+        )
+    mo.md(_msg_gpu)
     return (gpu_disponivel,)
 
 
@@ -609,6 +657,34 @@ def _(AutoModelForMultimodalLM, AutoProcessor, gpu_disponivel, mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## 8.5 Qwen3-VL fine-tuned (LoRA)
+
+    Modelo ajustado no BRESSAY pelo notebook `03_finetune_qwen_bressay.py`.
+    Se a pasta `qwen3vl_ft_bressay/` não existir, a seção 9.9 é pulada.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(AutoModelForMultimodalLM, AutoProcessor, gpu_disponivel, mo, os):
+    DIR_QWEN_FT = "qwen3vl_ft_bressay"
+
+    model_qwen_ft = None
+    processor_qwen_ft = None
+    if gpu_disponivel and os.path.isdir(DIR_QWEN_FT):
+        processor_qwen_ft = AutoProcessor.from_pretrained(DIR_QWEN_FT)
+        model_qwen_ft = AutoModelForMultimodalLM.from_pretrained(
+            DIR_QWEN_FT, device_map="auto"
+        )
+
+    _status_ft = "✅ carregado" if model_qwen_ft is not None else "❌ não encontrado"
+    mo.md(f"**Qwen3-VL FT** — {_status_ft} (`{DIR_QWEN_FT}/`)")
+    return model_qwen_ft, processor_qwen_ft
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # 9 Rodando o Experimento
     """)
     return
@@ -626,43 +702,120 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(Image, cv2, normalizar, os, psutil, time, torch):
+def _(Image, cv2, normalizar, os, psutil, threading, time, torch):
     # ──────────────────────────────────────────────────────────
     # Funções de predição — uma por motor de OCR
     # Assinatura: (caminho_imagem, ...) -> (texto, tempo, vram_mb, ram_mb)
     # ──────────────────────────────────────────────────────────
 
-    def _medir_ram_peak():
-        """Retorna o pico de RAM do processo atual em MB."""
-        proc = psutil.Process()
-        return proc.memory_info().rss / 1024**2
+    class MonitorRecursos:
+        """Mede o pico de RAM (processo) e o pico incremental de VRAM (GPU).
 
-    def _medir_vram_peak():
-        """Retorna o pico de VRAM alocada em MB (0 se sem GPU)."""
-        if torch.cuda.is_available():
-            return torch.cuda.max_memory_allocated() / 1024**2
-        return 0.0
+        Como os três motores ficam carregados no mesmo processo, a VRAM bruta
+        não serve: ela é dominada pelo modelo residente (ex.: Qwen 8B ~19 GB).
+        Por isso reportamos o **delta** em relação ao baseline imediatamente
+        antes da inferência. A medição combina:
+          - estatísticas do alocador do PyTorch (preciso para TrOCR e Qwen);
+          - memória usada na GPU via CUDA runtime (captura o alocador do Paddle).
+        A RAM é amostrada em background para registrar o pico, não só o fim.
+        """
+
+        def __init__(self, intervalo=0.001):
+            self._intervalo = intervalo
+            self._proc = psutil.Process()
+            self._thread = None
+            self._parar = threading.Event()
+            self._tem_gpu = torch.cuda.is_available()
+            self._device = torch.device("cuda") if self._tem_gpu else None
+            self._ram_base = 0.0
+            self._ram_pico = 0.0
+            self._vram_base = 0.0
+            self._vram_pico = 0.0
+            self._torch_base = 0.0
+
+        def _vram_usada_mb(self):
+            """VRAM usada na GPU (dispositivo inteiro), via CUDA runtime."""
+            if not self._tem_gpu:
+                return 0.0
+            try:
+                livre, total = torch.cuda.mem_get_info(self._device)
+                return (total - livre) / 1024**2
+            except Exception:
+                return 0.0
+
+        def _amostrar(self):
+            while not self._parar.is_set():
+                self._ram_pico = max(
+                    self._ram_pico, self._proc.memory_info().rss / 1024**2
+                )
+                if self._tem_gpu:
+                    self._vram_pico = max(
+                        self._vram_pico, self._vram_usada_mb()
+                    )
+                self._parar.wait(self._intervalo)
+
+        def __enter__(self):
+            self._ram_base = self._proc.memory_info().rss / 1024**2
+            self._ram_pico = self._ram_base
+            if self._tem_gpu:
+                self._vram_base = self._vram_usada_mb()
+                self._vram_pico = self._vram_base
+                self._torch_base = torch.cuda.memory_allocated(self._device)
+                torch.cuda.reset_peak_memory_stats(self._device)
+            self._parar.clear()
+            self._thread = threading.Thread(target=self._amostrar, daemon=True)
+            self._thread.start()
+            return self
+
+        def __exit__(self, *exc):
+            self._parar.set()
+            if self._thread is not None:
+                self._thread.join()
+            self._ram_pico = max(
+                self._ram_pico, self._proc.memory_info().rss / 1024**2
+            )
+            if self._tem_gpu:
+                self._vram_pico = max(
+                    self._vram_pico, self._vram_usada_mb()
+                )
+            return False
+
+        @property
+        def ram_pico_mb(self):
+            return max(self._ram_pico - self._ram_base, 0.0)
+
+        @property
+        def vram_pico_mb(self):
+            """Pico incremental de VRAM (MB) em relação ao baseline."""
+            if not self._tem_gpu:
+                return 0.0
+            try:
+                torch_delta = (
+                    torch.cuda.max_memory_allocated(self._device)
+                    - self._torch_base
+                ) / 1024**2
+            except Exception:
+                torch_delta = 0.0
+            device_delta = max(self._vram_pico - self._vram_base, 0.0)
+            return max(torch_delta, device_delta)
 
     def predizer_trocr(caminho_imagem, image_processor, tokenizer, model):
         """TrOCR — modelo Transformer para texto manuscrito."""
         try:
-            if torch.cuda.is_available():
-                torch.cuda.reset_peak_memory_stats()
-            ram_antes = _medir_ram_peak()
-            start = time.time()
+            with MonitorRecursos() as mon:
+                start = time.time()
+                image = Image.open(caminho_imagem).convert("RGB")
+                pixel_values = image_processor(
+                    images=image, return_tensors="pt"
+                ).pixel_values
+                pixel_values = pixel_values.to(model.device)
+                generated_ids = model.generate(pixel_values, max_new_tokens=256)
+                text = tokenizer.batch_decode(
+                    generated_ids, skip_special_tokens=True
+                )[0]
+                elapsed = time.time() - start
 
-            image = Image.open(caminho_imagem).convert("RGB")
-            pixel_values = image_processor(
-                images=image, return_tensors="pt"
-            ).pixel_values
-            pixel_values = pixel_values.to(model.device)
-            generated_ids = model.generate(pixel_values, max_new_tokens=256)
-            text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-
-            elapsed = time.time() - start
-            vram_mb = _medir_vram_peak()
-            ram_mb = _medir_ram_peak() - ram_antes
-            return normalizar(text), elapsed, vram_mb, max(ram_mb, 0)
+            return normalizar(text), elapsed, mon.vram_pico_mb, mon.ram_pico_mb
         except Exception as e:
             print(f" TrOCR [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0, 0.0, 0.0
@@ -670,38 +823,29 @@ def _(Image, cv2, normalizar, os, psutil, time, torch):
     def predizer_paddle(caminho_imagem, ocr):
         """PaddleOCR — PP-OCRv6 com detector + recognizer integrados."""
         try:
-            if torch.cuda.is_available():
-                torch.cuda.reset_peak_memory_stats()
-            ram_antes = _medir_ram_peak()
-            start = time.time()
-
-            img = cv2.imread(caminho_imagem)
-            if img is None:
-                return "", time.time() - start, 0.0, 0.0
-
-            resultado = ocr.predict(img)
-            if not resultado or not isinstance(resultado, list):
-                return "", time.time() - start, 0.0, 0.0
-
             textos = []
-            for res in resultado:
-                if hasattr(res, "rec_texts") and res.rec_texts:
-                    for t in res.rec_texts:
-                        if str(t).strip():
-                            textos.append(str(t).strip())
-                elif isinstance(res, dict) and "rec_texts" in res:
-                    for t in res["rec_texts"]:
-                        if str(t).strip():
-                            textos.append(str(t).strip())
+            with MonitorRecursos() as mon:
+                start = time.time()
+                img = cv2.imread(caminho_imagem)
+                if img is not None:
+                    resultado = ocr.predict(img)
+                    if resultado and isinstance(resultado, list):
+                        for res in resultado:
+                            if hasattr(res, "rec_texts") and res.rec_texts:
+                                for t in res.rec_texts:
+                                    if str(t).strip():
+                                        textos.append(str(t).strip())
+                            elif isinstance(res, dict) and "rec_texts" in res:
+                                for t in res["rec_texts"]:
+                                    if str(t).strip():
+                                        textos.append(str(t).strip())
+                elapsed = time.time() - start
 
-            elapsed = time.time() - start
-            vram_mb = _medir_vram_peak()
-            ram_mb = _medir_ram_peak() - ram_antes
             return (
                 " ".join(textos).strip().lower(),
                 elapsed,
-                vram_mb,
-                max(ram_mb, 0),
+                mon.vram_pico_mb,
+                mon.ram_pico_mb,
             )
         except Exception as e:
             print(f" PaddleOCR [{os.path.basename(caminho_imagem)}]: {e}")
@@ -710,47 +854,42 @@ def _(Image, cv2, normalizar, os, psutil, time, torch):
     def predizer_qwen(caminho_imagem, processor, model):
         """Qwen3-VL — modelo multimodal para OCR via instrução."""
         try:
-            if torch.cuda.is_available():
-                torch.cuda.reset_peak_memory_stats()
-            ram_antes = _medir_ram_peak()
-            start = time.time()
+            with MonitorRecursos() as mon:
+                start = time.time()
+                image = Image.open(caminho_imagem).convert("RGB")
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": image},
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Transcreva fielmente o texto manuscrito nesta imagem. "
+                                    "É uma redação em português brasileiro (pode ser uma "
+                                    "palavra, uma frase ou um parágrafo). Retorne apenas o "
+                                    "texto transcrito, sem explicações."
+                                ),
+                            },
+                        ],
+                    },
+                ]
+                inputs = processor.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                ).to(model.device)
 
-            image = Image.open(caminho_imagem).convert("RGB")
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": image},
-                        {
-                            "type": "text",
-                            "text": (
-                                "Transcreva fielmente o texto manuscrito nesta imagem. "
-                                "É uma redação em português brasileiro (pode ser uma "
-                                "palavra, uma frase ou um parágrafo). Retorne apenas o "
-                                "texto transcrito, sem explicações."
-                            ),
-                        },
-                    ],
-                },
-            ]
-            inputs = processor.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-                tokenize=True,
-                return_dict=True,
-                return_tensors="pt",
-            ).to(model.device)
+                outputs = model.generate(**inputs, max_new_tokens=256)
+                text = processor.decode(
+                    outputs[0][inputs["input_ids"].shape[-1] :],
+                    skip_special_tokens=True,
+                )
+                elapsed = time.time() - start
 
-            outputs = model.generate(**inputs, max_new_tokens=256)
-            text = processor.decode(
-                outputs[0][inputs["input_ids"].shape[-1] :],
-                skip_special_tokens=True,
-            )
-
-            elapsed = time.time() - start
-            vram_mb = _medir_vram_peak()
-            ram_mb = _medir_ram_peak() - ram_antes
-            return normalizar(text), elapsed, vram_mb, max(ram_mb, 0)
+            return normalizar(text), elapsed, mon.vram_pico_mb, mon.ram_pico_mb
         except Exception as e:
             print(f" Qwen [{os.path.basename(caminho_imagem)}]: {e}")
             return "", 0.0, 0.0, 0.0
@@ -780,6 +919,10 @@ def _(calcular_metricas, normalizar, os, pd):
         for idx, linha in df.iterrows():
             gabarito = normalizar(linha["Text"])
             caminho = str(linha["Images"])
+
+            # amostras cujo gabarito fica vazio após a limpeza não são avaliáveis
+            if not gabarito:
+                continue
 
             if not os.path.exists(caminho):
                 continue
@@ -846,10 +989,13 @@ def _(
             csv_saida=_NOME_CSV,
             df=df_amostra,
         )
-        mo.md(f"PaddleOCR GPU: **{len(df_paddle_gpu)}** amostras → `{_NOME_CSV}`")
+        _msg_bench = (
+            f"PaddleOCR GPU: **{len(df_paddle_gpu)}** amostras → `{_NOME_CSV}`"
+        )
     else:
         df_paddle_gpu = None
-        mo.md("⚠️ GPU indisponível. Pule esta célula.")
+        _msg_bench = "⚠️ GPU indisponível. Pule esta célula."
+    mo.md(_msg_bench)
     return
 
 
@@ -914,10 +1060,13 @@ def _(
             csv_saida=_NOME_CSV,
             df=df_amostra,
         )
-        mo.md(f"TrOCR GPU: **{len(df_trocr_gpu)}** amostras → `{_NOME_CSV}`")
+        _msg_bench = (
+            f"TrOCR GPU: **{len(df_trocr_gpu)}** amostras → `{_NOME_CSV}`"
+        )
     else:
         df_trocr_gpu = None
-        mo.md("⚠️ GPU indisponível. Pule esta célula.")
+        _msg_bench = "⚠️ GPU indisponível. Pule esta célula."
+    mo.md(_msg_bench)
     return
 
 
@@ -987,10 +1136,13 @@ def _(
             csv_saida=_NOME_CSV,
             df=df_amostra,
         )
-        mo.md(f"Qwen3-VL GPU: **{len(df_qwen_gpu)}** amostras → `{_NOME_CSV}`")
+        _msg_bench = (
+            f"Qwen3-VL GPU: **{len(df_qwen_gpu)}** amostras → `{_NOME_CSV}`"
+        )
     else:
         df_qwen_gpu = None
-        mo.md("⚠️ GPU indisponível. Pule esta célula.")
+        _msg_bench = "⚠️ GPU indisponível. Pule esta célula."
+    mo.md(_msg_bench)
     return
 
 
@@ -1033,6 +1185,46 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## 9.9 Qwen3-VL fine-tuned — GPU
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    df_amostra,
+    mo,
+    model_qwen_ft,
+    partial,
+    predizer_qwen,
+    processor_qwen_ft,
+    rodar_benchmark_ocr,
+):
+    if model_qwen_ft is not None and processor_qwen_ft is not None:
+        _NOME_CSV = "resultados_qwen_ft_gpu_bressay.csv"
+        df_qwen_ft = rodar_benchmark_ocr(
+            nome="Qwen3-VL-FT-GPU",
+            predizer=partial(
+                predizer_qwen,
+                processor=processor_qwen_ft,
+                model=model_qwen_ft,
+            ),
+            csv_saida=_NOME_CSV,
+            df=df_amostra,
+        )
+        _msg_bench = (
+            f"Qwen3-VL FT GPU: **{len(df_qwen_ft)}** amostras → `{_NOME_CSV}`"
+        )
+    else:
+        df_qwen_ft = None
+        _msg_bench = "⚠️ Modelo fine-tuned não encontrado. Rode o notebook 03."
+    mo.md(_msg_bench)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # 10 Resultados (Tabelas)
 
     As células abaixo carregam os CSVs disponíveis e montam as comparações.
@@ -1050,6 +1242,7 @@ def _():
         ("TrOCR CPU", "resultados_trocr_cpu_bressay.csv"),
         ("Qwen3-VL GPU", "resultados_qwen_gpu_bressay.csv"),
         ("Qwen3-VL CPU", "resultados_qwen_cpu_bressay.csv"),
+        ("Qwen3-VL FT GPU", "resultados_qwen_ft_gpu_bressay.csv"),
     ]
     return (CSVS_RESULTADO,)
 
@@ -1092,16 +1285,22 @@ def _(CSVS_RESULTADO, mo, os, pd):
             dfs_disponiveis[_nome] = _normalizar_resultado(pd.read_csv(_csv))
 
     if not dfs_disponiveis:
-        mo.md(
+        _resultado = mo.md(
             "⚠️  Nenhum CSV de resultado encontrado. Rode as células 9.3–9.8 primeiro."
         )
     else:
-        mo.md(f"CSVs encontrados: **{', '.join(dfs_disponiveis.keys())}**")
+        _elementos = [
+            mo.md(f"CSVs encontrados: **{', '.join(dfs_disponiveis.keys())}**")
+        ]
         for _nome, _df in dfs_disponiveis.items():
-            mo.md(f"### {_nome}")
-            mo.ui.table(
-                _df[["Tipo", "Arquivo", "Gabarito", "Predicao"]].head(5)
+            _elementos.append(mo.md(f"### {_nome}"))
+            _elementos.append(
+                mo.ui.table(
+                    _df[["Tipo", "Arquivo", "Gabarito", "Predicao"]].head(5)
+                )
             )
+        _resultado = mo.vstack(_elementos)
+    _resultado
     return (dfs_disponiveis,)
 
 
