@@ -28,6 +28,45 @@ def _():
 
 
 @app.cell(hide_code=True)
+def _():
+    import os
+    import re
+    import urllib.request
+    import zipfile
+    from types import SimpleNamespace
+
+    import gdown
+    import pandas as pd
+    import torch
+    from peft import LoraConfig, get_peft_model
+    from PIL import Image
+    from transformers import (
+        AutoModelForMultimodalLM,
+        AutoProcessor,
+        Trainer,
+        TrainingArguments,
+    )
+
+    return (
+        AutoModelForMultimodalLM,
+        AutoProcessor,
+        Image,
+        LoraConfig,
+        SimpleNamespace,
+        Trainer,
+        TrainingArguments,
+        gdown,
+        get_peft_model,
+        os,
+        pd,
+        re,
+        torch,
+        urllib,
+        zipfile,
+    )
+
+
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     # Fine-tuning do Qwen3-VL no BRESSAY (LoRA)
@@ -62,9 +101,7 @@ def _(mo):
 
 
 @app.cell
-def _():
-    from types import SimpleNamespace
-
+def _(SimpleNamespace):
     CFG = SimpleNamespace(
         MODELO_BASE="Qwen/Qwen3-VL-8B-Instruct",
         DATASET_DIR="bressay",
@@ -94,11 +131,7 @@ def _():
 
 
 @app.cell(hide_code=True)
-def _(CFG, mo):
-    import os
-    import urllib.request
-    import zipfile
-
+def _(CFG, gdown, mo, os, urllib, zipfile):
     # ── Download do dataset BRESSAY (se necessário) ──
     # Mesmo procedimento usado no notebook 02_comparacao_ocr_bressay.py.
     DATASET_URL = "https://drive.google.com/file/d/1XACLMLMLuMs_6EpNaOD8nd-Nn5X9T7eH/view?usp=sharing"
@@ -108,14 +141,7 @@ def _(CFG, mo):
         if not os.path.exists(zip_path):
             print("Baixando dataset BRESSAY...")
             if "drive.google.com" in DATASET_URL:
-                try:
-                    import gdown
-
-                    gdown.download(DATASET_URL, zip_path, quiet=False)
-                except ImportError:
-                    raise ImportError(
-                        "Para links do Google Drive, instale gdown: pip install gdown"
-                    )
+                gdown.download(DATASET_URL, zip_path, quiet=False)
             else:
                 urllib.request.urlretrieve(DATASET_URL, zip_path)
 
@@ -138,12 +164,7 @@ def _(mo):
 
 
 @app.cell
-def _(CFG, mo):
-    import os
-    import re
-
-    import pandas as pd
-
+def _(CFG, mo, os, pd, re):
     def limpar_anotacoes(texto: str) -> str:
         """Mesma limpeza de anotações usada no notebook 02."""
         t = str(texto)
@@ -224,10 +245,7 @@ def _(mo):
 
 
 @app.cell
-def _(CFG, mo, torch):
-    from peft import LoraConfig, get_peft_model
-    from transformers import AutoModelForMultimodalLM, AutoProcessor
-
+def _(AutoModelForMultimodalLM, AutoProcessor, CFG, LoraConfig, get_peft_model, mo, torch):
     processor = AutoProcessor.from_pretrained(CFG.MODELO_BASE)
     model = AutoModelForMultimodalLM.from_pretrained(
         CFG.MODELO_BASE, torch_dtype=torch.bfloat16
@@ -279,9 +297,7 @@ def _(mo):
 
 
 @app.cell
-def _(CFG, df_treino, df_valid, model, processor, torch):
-    from PIL import Image
-
+def _(CFG, Image, df_treino, df_valid, model, processor, torch):
     def _ultima_ocorrencia(ids, alvo):
         for i in range(len(ids) - len(alvo), -1, -1):
             if ids[i : i + len(alvo)] == alvo:
@@ -386,9 +402,7 @@ def _(mo):
 
 
 @app.cell
-def _(CFG, collate_fn, ds_treino, ds_valid, model, mo):
-    from transformers import Trainer, TrainingArguments
-
+def _(CFG, TrainingArguments, Trainer, collate_fn, ds_treino, ds_valid, model, mo):
     args = TrainingArguments(
         output_dir=CFG.DIR_CKPT,
         per_device_train_batch_size=CFG.BATCH,
@@ -457,7 +471,7 @@ def _(mo):
 
 
 @app.cell
-def _(CFG, model, modelo_treinado, mo, processor):
+def _(CFG, model, modelo_treinado, mo, os, processor):
     if modelo_treinado:
         os.makedirs(CFG.DIR_SAIDA, exist_ok=True)
         modelo_merge = model.merge_and_unload()
