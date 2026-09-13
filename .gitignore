@@ -15,3 +15,5 @@ resultados_benchmark_ocr.csv
 # Cache de modelos (baixados automaticamente)
 .paddleocr/
 __marimo__/session/
+*.csv
+bressay/
