@@ -2,6 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "accelerate>=1.14.0",
+#     "gdown>=5.2.0",
 #     "marimo>=0.23.14",
 #     "numpy>=2.2.6",
 #     "pandas>=2.3.3",
@@ -90,6 +91,42 @@ def _():
         FORCAR_RETREINO=False,
     )
     return (CFG,)
+
+
+@app.cell(hide_code=True)
+def _(CFG, mo):
+    import os
+    import urllib.request
+    import zipfile
+
+    # ── Download do dataset BRESSAY (se necessário) ──
+    # Mesmo procedimento usado no notebook 02_comparacao_ocr_bressay.py.
+    DATASET_URL = "https://drive.google.com/file/d/1XACLMLMLuMs_6EpNaOD8nd-Nn5X9T7eH/view?usp=sharing"
+
+    if not os.path.exists(CFG.DATASET_DIR):
+        zip_path = "bressay.zip"
+        if not os.path.exists(zip_path):
+            print("Baixando dataset BRESSAY...")
+            if "drive.google.com" in DATASET_URL:
+                try:
+                    import gdown
+
+                    gdown.download(DATASET_URL, zip_path, quiet=False)
+                except ImportError:
+                    raise ImportError(
+                        "Para links do Google Drive, instale gdown: pip install gdown"
+                    )
+            else:
+                urllib.request.urlretrieve(DATASET_URL, zip_path)
+
+        # Extrai na raiz (o zip já contém a pasta bressay/ internamente)
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(".")
+        _msg_dataset = "Dataset BRESSAY baixado e extraído!"
+    else:
+        _msg_dataset = "Dataset BRESSAY já existe localmente."
+    mo.md(_msg_dataset)
+    return
 
 
 @app.cell(hide_code=True)
